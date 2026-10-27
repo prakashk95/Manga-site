@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VaniScans — Read Manhwa, Manga & Webtoons</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        asura: {
+                            bg: '#0c0d14',
+                            card: '#121421',
+                            cardHover: '#181b2c',
+                            border: '#23273e',
+                            primary: '#8b5cf6',
+                            primaryHover: '#7c3aed',
+                            accent: '#a855f7',
+                            glow: 'rgba(139, 92, 246, 0.35)',
+                            textMuted: '#94a3b8'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Custom Stylesheet -->
+    <link rel="stylesheet" href="/css/style.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- JSZip for Bulk Chapter Unpacking -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body class="min-h-screen flex flex-col bg-[#0b0c13] selection:bg-purple-600 selection:text-white">
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- ================= PUBLIC NAVBAR ================= -->
+    <header class="sticky top-0 z-40 bg-[#0c0d14]/90 backdrop-blur-md border-b border-[#1f2337]">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+            <div class="flex items-center gap-6">
+                <a href="javascript:void(0)" onclick="app.showHomeView()" class="flex items-center gap-2.5 group">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-700 via-violet-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-600/30 group-hover:scale-105 transition-transform">
+                        <i data-lucide="zap" class="w-6 h-6 text-white fill-current"></i>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-xl font-black tracking-wider text-white flex items-center gap-1">
+                            VANI<span class="text-purple-500 neon-text-glow">SCANS</span>
+                        </span>
+                        <span class="text-[9px] tracking-widest uppercase text-purple-400/80 -mt-1 font-semibold">Webtoon & Manga Hub</span>
+                    </div>
+                </a>
+
+                <nav class="hidden md:flex items-center gap-1 text-sm font-medium text-slate-300">
+                    <button onclick="app.showHomeView()" class="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition flex items-center gap-1.5">
+                        <i data-lucide="home" class="w-4 h-4 text-purple-400"></i> Home
+                    </button>
+                    <button onclick="app.scrollToCatalog()" class="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition flex items-center gap-1.5">
+                        <i data-lucide="compass" class="w-4 h-4 text-purple-400"></i> Browse
+                    </button>
+                    <button onclick="app.filterBookmarks()" class="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition flex items-center gap-1.5">
+                        <i data-lucide="bookmark" class="w-4 h-4 text-purple-400"></i> Bookmarks
+                    </button>
+                    <button onclick="app.filterByGenre('Action')" class="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition">
+                        Action
+                    </button>
+                    <button onclick="app.filterByGenre('Fantasy')" class="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition">
+                        Fantasy
+                    </button>
+                </nav>
+            </div>
+
+            <div class="flex items-center gap-2.5 flex-1 max-w-sm justify-end">
+                <div class="relative w-full max-w-[180px] sm:max-w-xs">
+                    <input type="text" id="globalSearchInput" placeholder="Search series, authors..." 
+                        class="w-full bg-[#141624] border border-[#23273e] text-slate-200 text-xs sm:text-sm rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:border-purple-500 transition placeholder:text-slate-500">
+                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                </div>
+                <button onclick="app.toggleMobileDrawer()" class="md:hidden p-2 rounded-xl bg-[#141624] border border-[#23273e] text-slate-300 hover:text-white transition" aria-label="Menu">
+                    <i data-lucide="menu" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+
+        <div id="mobileNavDrawer" class="hidden md:hidden bg-[#0e101a] border-b border-[#1f2337] px-4 py-4 space-y-2">
+            <button onclick="app.showHomeView(); app.toggleMobileDrawer();" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-white/5 text-sm font-semibold text-slate-200 flex items-center gap-2.5">
+                <i data-lucide="home" class="w-4 h-4 text-purple-400"></i> Home
+            </button>
+            <button onclick="app.scrollToCatalog(); app.toggleMobileDrawer();" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-white/5 text-sm font-semibold text-slate-200 flex items-center gap-2.5">
+                <i data-lucide="compass" class="w-4 h-4 text-purple-400"></i> Browse Catalog
+            </button>
+            <button onclick="app.filterBookmarks(); app.toggleMobileDrawer();" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-white/5 text-sm font-semibold text-slate-200 flex items-center gap-2.5">
+                <i data-lucide="bookmark" class="w-4 h-4 text-purple-400"></i> Saved Bookmarks
+            </button>
+            <div class="pt-2 border-t border-[#1f2337] flex flex-wrap gap-2">
+                <button onclick="app.filterByGenre('Action'); app.toggleMobileDrawer();" class="px-3 py-1.5 rounded-lg bg-[#16192b] text-xs font-medium text-slate-300">Action</button>
+                <button onclick="app.filterByGenre('Fantasy'); app.toggleMobileDrawer();" class="px-3 py-1.5 rounded-lg bg-[#16192b] text-xs font-medium text-slate-300">Fantasy</button>
+                <button onclick="app.filterByGenre('Regression'); app.toggleMobileDrawer();" class="px-3 py-1.5 rounded-lg bg-[#16192b] text-xs font-medium text-slate-300">Regression</button>
+                <button onclick="app.filterByGenre('Murim'); app.toggleMobileDrawer();" class="px-3 py-1.5 rounded-lg bg-[#16192b] text-xs font-medium text-slate-300">Murim</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ================= MAIN CONTENT CONTAINER ================= -->
+    <main id="appMain" class="flex-grow">
+        
+        <!-- ================= HOME & BROWSE VIEW ================= -->
+        <div id="homeView" class="space-y-8 pb-16">
+            <section class="relative bg-gradient-to-b from-[#141626] to-[#0b0c13] overflow-hidden border-b border-[#1f2337]">
+                <div id="heroCarousel" class="relative max-w-7xl mx-auto min-h-[360px] sm:min-h-[440px] flex items-end p-5 sm:p-12"></div>
+                <div class="absolute bottom-4 right-5 sm:right-12 flex items-center gap-2.5 z-20">
+                    <button onclick="app.prevSlide()" class="p-2 rounded-lg bg-black/60 hover:bg-purple-600 text-white backdrop-blur transition border border-white/10">
+                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                    </button>
+                    <div id="carouselDots" class="flex gap-1.5"></div>
+                    <button onclick="app.nextSlide()" class="p-2 rounded-lg bg-black/60 hover:bg-purple-600 text-white backdrop-blur transition border border-white/10">
+                        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </section>
+
+            <section id="catalogSection" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="bg-[#121422] border border-[#20243b] p-4 rounded-2xl flex flex-wrap gap-3 items-center justify-between">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs uppercase font-bold text-purple-400 tracking-wider flex items-center gap-1 mr-1">
+                            <i data-lucide="filter" class="w-3.5 h-3.5"></i> Genres:
+                        </span>
+                        <button onclick="app.setGenreFilter('All')" class="genre-tag active-genre px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600 text-white transition" data-genre="All">All</button>
+                        <button onclick="app.setGenreFilter('Action')" class="genre-tag px-3 py-1.5 rounded-lg text-xs font-medium bg-[#1a1d30] hover:bg-purple-600/30 text-slate-300 transition" data-genre="Action">Action</button>
+                        <button onclick="app.setGenreFilter('Fantasy')" class="genre-tag px-3 py-1.5 rounded-lg text-xs font-medium bg-[#1a1d30] hover:bg-purple-600/30 text-slate-300 transition" data-genre="Fantasy">Fantasy</button>
+                        <button onclick="app.setGenreFilter('Regression')" class="genre-tag px-3 py-1.5 rounded-lg text-xs font-medium bg-[#1a1d30] hover:bg-purple-600/30 text-slate-300 transition" data-genre="Regression">Regression</button>
+                        <button onclick="app.setGenreFilter('Murim')" class="genre-tag px-3 py-1.5 rounded-lg text-xs font-medium bg-[#1a1d30] hover:bg-purple-600/30 text-slate-300 transition" data-genre="Murim">Murim</button>
+                    </div>
+
+                    <div class="flex items-center gap-2 w-full sm:w-auto">
+                        <select id="statusFilter" onchange="app.applyFilters()" class="flex-1 sm:flex-initial bg-[#181a2c] text-xs font-semibold text-slate-300 border border-[#272b46] rounded-xl px-3 py-2 outline-none focus:border-purple-500">
+                            <option value="All">All Statuses</option>
+                            <option value="Ongoing">Ongoing</option>
+                            <option value="Completed">Completed</option>
+                        </select>
+                        <select id="sortFilter" onchange="app.applyFilters()" class="flex-1 sm:flex-initial bg-[#181a2c] text-xs font-semibold text-slate-300 border border-[#272b46] rounded-xl px-3 py-2 outline-none focus:border-purple-500">
+                            <option value="latest">Latest Updates</option>
+                            <option value="rating">Top Rated</option>
+                            <option value="alphabetical">Title (A-Z)</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                    <div class="lg:col-span-8 xl:col-span-9">
+                        <div class="flex items-center justify-between mb-6">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-2.5 h-6 bg-gradient-to-b from-purple-500 to-indigo-500 rounded-full"></span>
+                                <h2 id="catalogSectionTitle" class="text-lg sm:text-2xl font-black text-white tracking-wide">LATEST CHAPTER RELEASES</h2>
+                            </div>
+                            <span id="seriesCountBadge" class="text-xs font-semibold px-3 py-1 bg-[#181c2e] text-purple-400 border border-purple-500/20 rounded-full">
+                                4 Series
+                            </span>
+                        </div>
+
+                        <div id="mangaGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 sm:gap-5"></div>
+
+                        <div id="emptyCatalogState" class="hidden text-center py-20 bg-[#121422] rounded-2xl border border-dashed border-[#242842] p-8">
+                            <i data-lucide="book-x" class="w-12 h-12 text-slate-600 mx-auto mb-3"></i>
+                            <h3 class="text-lg font-bold text-slate-300">No series match your criteria</h3>
+                            <p class="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Try clearing your search or selecting another genre filter.</p>
+                        </div>
+                    </div>
+
+                    <aside class="lg:col-span-4 xl:col-span-3 bg-[#121422] border border-[#1f2337] rounded-2xl p-5 space-y-4 sticky top-20">
+                        <div class="flex items-center justify-between border-b border-[#1f2337] pb-3">
+                            <div class="flex items-center gap-2">
+                                <i data-lucide="flame" class="w-5 h-5 text-purple-500 fill-purple-500"></i>
+                                <h3 class="text-sm font-black tracking-wider uppercase text-white">Popular Today</h3>
+                            </div>
+                            <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-purple-600/20 text-purple-300">Top Ranked</span>
+                        </div>
+                        <div id="popularSidebarList" class="space-y-3"></div>
+                    </aside>
+                </div>
+            </section>
+        </div>
+
+        <!-- ================= DETAIL VIEW ================= -->
+        <div id="detailView" class="hidden min-h-screen pb-20">
+            <div id="detailBanner" class="relative w-full h-80 sm:h-96 bg-cover bg-center">
+                <div class="absolute inset-0 banner-gradient backdrop-blur-sm"></div>
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-end pb-8 relative z-10">
+                    <button onclick="app.showHomeView()" class="absolute top-6 left-4 sm:left-8 px-4 py-2 bg-black/60 hover:bg-purple-600 text-white rounded-xl text-xs font-semibold backdrop-blur border border-white/10 flex items-center gap-1.5 transition">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Back to Catalog
+                    </button>
+                </div>
+            </div>
+
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-20">
+                <div class="flex flex-col lg:flex-row gap-8 items-start">
+                    <div class="w-full lg:w-72 shrink-0 bg-[#121422] border border-[#20243b] rounded-2xl p-5 shadow-2xl">
+                        <img id="detailCover" src="" alt="Cover" referrerpolicy="no-referrer" class="w-full aspect-[3/4] object-cover rounded-xl shadow-lg border border-white/5 mb-4">
+                        <div class="space-y-3">
+                            <button id="bookmarkToggleBtn" onclick="app.toggleBookmarkDetail()" class="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition">
+                                <i data-lucide="bookmark" class="w-4 h-4"></i>
+                                <span id="bookmarkBtnText">Bookmark</span>
+                            </button>
+                            <div class="pt-4 border-t border-[#1d2136] space-y-2 text-xs">
+                                <div class="flex justify-between text-slate-400">
+                                    <span>Status:</span>
+                                    <span id="detailStatus" class="font-semibold text-emerald-400">Ongoing</span>
+                                </div>
+                                <div class="flex justify-between text-slate-400">
+                                    <span>Author:</span>
+                                    <span id="detailAuthor" class="font-semibold text-slate-200">Unknown</span>
+                                </div>
+                                <div class="flex justify-between text-slate-400">
+                                    <span>Rating:</span>
+                                    <span id="detailRating" class="font-semibold text-amber-400 flex items-center gap-1">
+                                        <i data-lucide="star" class="w-3.5 h-3.5 fill-current"></i> 9.8
+                                    </span>
+                                </div>
+                                <div class="flex justify-between text-slate-400">
+                                    <span>Total Chapters:</span>
+                                    <span id="detailTotalChapters" class="font-semibold text-purple-400">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex-grow w-full space-y-6">
+                        <div class="bg-[#121422] border border-[#20243b] rounded-2xl p-6 sm:p-8">
+                            <div id="detailGenres" class="flex flex-wrap gap-2 mb-3"></div>
+                            <h1 id="detailTitle" class="text-2xl sm:text-4xl font-black text-white tracking-tight mb-2">Series Title</h1>
+                            <p id="detailSynopsis" class="text-sm leading-relaxed text-slate-400 font-normal">Synopsis goes here...</p>
+                        </div>
+
+                        <div class="bg-[#121422] border border-[#20243b] rounded-2xl p-6 sm:p-8">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                                <div class="flex items-center gap-2">
+                                    <i data-lucide="layers" class="w-5 h-5 text-purple-400"></i>
+                                    <h2 class="text-lg font-bold text-white">CHAPTERS</h2>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <input type="text" id="chapterSearchInput" oninput="app.filterChaptersInDetail(this.value)" placeholder="Search chapters..." 
+                                        class="bg-[#181b2e] border border-[#242842] text-xs text-white rounded-xl px-3 py-2 outline-none focus:border-purple-500 w-44">
+                                    <button onclick="app.reverseChapterOrder()" class="p-2 bg-[#181b2e] hover:bg-purple-600/20 text-slate-300 rounded-xl border border-[#242842] transition" title="Invert sorting">
+                                        <i data-lucide="arrow-down-up" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="detailChapterList" class="space-y-2 max-h-[600px] overflow-y-auto pr-1"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= READER VIEW ================= -->
+        <div id="readerView" class="hidden min-h-screen bg-[#07080d] flex flex-col relative select-none">
+            <div id="readerTopNav" class="sticky top-0 z-50 bg-[#0e101c]/95 border-b border-[#21253d] px-4 py-2.5 backdrop-blur-md flex items-center justify-between transition-transform duration-300">
+                <div class="flex items-center gap-3">
+                    <button onclick="app.exitReader()" class="p-2 hover:bg-white/10 rounded-xl text-slate-300 hover:text-white transition" title="Back to Series">
+                        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                    </button>
+                    <div>
+                        <div id="readerSeriesTitle" class="text-xs font-semibold text-purple-400 truncate max-w-[180px] sm:max-w-xs">Series</div>
+                        <div id="readerChapterTitle" class="text-sm font-black text-white truncate max-w-[200px] sm:max-w-sm">Chapter 1</div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button id="readerPrevBtn" onclick="app.navigateChapter(-1)" class="p-2 bg-[#171a2d] hover:bg-purple-600 disabled:opacity-40 disabled:hover:bg-[#171a2d] text-white rounded-xl border border-[#292e4c] transition" title="Previous Chapter">
+                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                    </button>
+                    <select id="readerChapterSelect" onchange="app.jumpToChapter(this.value)" class="bg-[#171a2d] border border-[#292e4c] text-xs font-semibold text-white rounded-xl px-2 sm:px-3 py-2 outline-none max-w-[130px] sm:max-w-xs truncate"></select>
+                    <button id="readerNextBtn" onclick="app.navigateChapter(1)" class="p-2 bg-[#171a2d] hover:bg-purple-600 disabled:opacity-40 disabled:hover:bg-[#171a2d] text-white rounded-xl border border-[#292e4c] transition" title="Next Chapter">
+                        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button onclick="app.toggleReadingMode()" id="readerModeToggleBtn" class="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-[#171a2d] hover:bg-white/5 rounded-xl border border-[#292e4c] text-xs font-medium text-slate-300">
+                        <i data-lucide="smartphone" class="w-3.5 h-3.5 text-purple-400"></i>
+                        <span id="readingModeLabel">Webtoon (Scroll)</span>
+                    </button>
+                    <button onclick="app.reloadCurrentChapterImages()" class="flex items-center gap-1.5 px-2.5 py-2 bg-[#171a2d] hover:bg-purple-600/30 rounded-xl border border-[#292e4c] text-xs font-semibold text-purple-300 transition" title="Reload / Refresh Chapter Images">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span class="hidden md:inline">Reload Images</span>
+                    </button>
+                    <button onclick="app.toggleFullScreen()" class="p-2 bg-[#171a2d] hover:bg-white/5 rounded-xl border border-[#292e4c] text-slate-300" title="Toggle Fullscreen">
+                        <i data-lucide="maximize" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="readerContainer" class="flex-grow flex flex-col items-center justify-start min-h-[85vh] py-4 w-full"></div>
+
+            <div id="singlePageControls" class="hidden sticky bottom-6 left-1/2 -translate-x-1/2 z-40 bg-black/85 backdrop-blur-md px-4 py-2.5 rounded-full border border-purple-500/30 flex items-center gap-4 shadow-2xl">
+                <button onclick="app.changeSinglePage(-1)" class="px-3 py-1 bg-purple-600/40 hover:bg-purple-600 text-white rounded-lg text-xs font-bold transition">Prev Page</button>
+                <span id="singlePageIndicator" class="text-xs font-bold text-purple-300">1 / 1</span>
+                <button onclick="app.changeSinglePage(1)" class="px-3 py-1 bg-purple-600/40 hover:bg-purple-600 text-white rounded-lg text-xs font-bold transition">Next Page</button>
+            </div>
+
+            <div class="max-w-2xl mx-auto w-full py-12 px-4 flex flex-col items-center gap-4 text-center">
+                <div class="text-xs font-medium text-slate-400">Finished Reading this chapter?</div>
+                <div class="flex items-center gap-3">
+                    <button onclick="app.navigateChapter(-1)" class="px-4 py-2 bg-[#16182a] hover:bg-purple-600 rounded-xl text-xs font-bold text-white border border-[#242842] transition">Previous Chapter</button>
+                    <button onclick="app.navigateChapter(1)" class="px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-purple-600/30 transition">Next Chapter</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= SECURE ADMIN PANEL VIEW (#adminpanel) ================= -->
+        <div id="adminLoginView" class="hidden min-h-[80vh] flex items-center justify-center p-4">
+            <div class="bg-[#121422] border border-[#23273e] rounded-3xl w-full max-w-md p-8 shadow-2xl space-y-6">
+                <div class="text-center space-y-2">
+                    <div class="w-12 h-12 rounded-2xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center mx-auto">
+                        <i data-lucide="shield-alert" class="w-6 h-6"></i>
+                    </div>
+                    <h2 class="text-xl font-black text-white">SECURE ADMIN GATEWAY</h2>
+                    <p class="text-xs text-slate-400">Protected by SHA-256 cryptographic hash verification.</p>
+                </div>
+
+                <form onsubmit="app.handleAdminLogin(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Username</label>
+                        <input type="text" id="adminUser" required autocomplete="username" 
+                            class="w-full bg-[#181b2e] border border-[#2b3052] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+                        <input type="password" id="adminPass" required autocomplete="current-password" 
+                            class="w-full bg-[#181b2e] border border-[#2b3052] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                    </div>
+                    <button type="submit" class="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-purple-600/30 transition">
+                        Authenticate
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div id="adminDashboardView" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#121422] border border-[#23273e] p-6 rounded-3xl">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-2xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center">
+                        <i data-lucide="terminal" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-black text-white">Creator Studio & Admin Dashboard</h1>
+                        <p class="text-xs text-slate-400">Manage series, upload single chapters, or crawl real chapters + images from MangaDex.org.</p>
+                    </div>
+                </div>
+                <button onclick="app.adminLogout()" class="px-4 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2 w-fit">
+                    <i data-lucide="log-out" class="w-4 h-4"></i> Lock Panel
+                </button>
+            </div>
+
+            <div class="flex border-b border-[#21243b] text-xs font-bold overflow-x-auto">
+                <button id="tabBtnNewSeries" onclick="app.switchStudioTab('newSeries')" class="py-3 px-5 border-b-2 border-purple-500 text-purple-400 flex items-center gap-2 whitespace-nowrap">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i> 1. Create / Edit Series
+                </button>
+                <button id="tabBtnSingleChapter" onclick="app.switchStudioTab('singleChapter')" class="py-3 px-5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2 whitespace-nowrap">
+                    <i data-lucide="file-plus" class="w-4 h-4"></i> 2. Add Single Chapter
+                </button>
+                <button id="tabBtnBulkZip" onclick="app.switchStudioTab('bulkZip')" class="py-3 px-5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2 whitespace-nowrap">
+                    <i data-lucide="globe" class="w-4 h-4"></i> 3. MangaDex.org Live Crawler
+                </button>
+                <button id="tabBtnAnalyticsAds" onclick="app.switchStudioTab('analyticsAds')" class="py-3 px-5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2 whitespace-nowrap">
+                    <i data-lucide="bar-chart-3" class="w-4 h-4"></i> 4. Analytics & Ad Placements
+                </button>
+            </div>
+
+            <!-- Tab 1: Create / Edit Manga Series -->
+            <div id="tabNewSeries" class="space-y-6">
+                <div class="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1f2337] pb-4">
+                        <div>
+                            <h3 id="seriesFormHeading" class="text-base font-black text-white">Create New Manga Series</h3>
+                            <p class="text-xs text-slate-400">Add a new series or select an existing series below to edit its metadata.</p>
+                        </div>
+                        <button type="button" id="cancelEditSeriesBtn" onclick="app.resetSeriesForm()" class="hidden px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition w-fit">
+                            Cancel Edit (New Mode)
+                        </button>
+                    </div>
+
+                    <form id="seriesEditorForm" onsubmit="app.handleCreateSeries(event)" class="space-y-4">
+                        <input type="hidden" id="editingSeriesId" value="">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Series Title *</label>
+                                <input type="text" id="seriesInputTitle" required placeholder="e.g., Solo Leveling: Ragnarok" 
+                                    class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Author / Studio</label>
+                                <input type="text" id="seriesInputAuthor" placeholder="e.g., Chugong, Redice Studio" 
+                                    class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Cover Image (URL or File Upload)</label>
+                                <div class="space-y-2">
+                                    <input type="text" id="seriesInputCoverUrl" placeholder="https://example.com/cover.jpg" 
+                                        class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500">
+                                    <label class="flex items-center gap-2 cursor-pointer bg-[#20243b] hover:bg-[#282d49] text-slate-300 text-xs px-3 py-2 rounded-xl border border-dashed border-[#383d63] transition justify-center">
+                                        <i data-lucide="image" class="w-4 h-4 text-purple-400"></i> Or upload cover image file
+                                        <input type="file" id="seriesCoverFile" accept="image/*" class="hidden" onchange="app.handleCoverFilePicked(this)">
+                                    </label>
+                                    <span id="coverFileName" class="text-[11px] text-purple-300 block truncate"></span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 mb-1">Genres (comma separated)</label>
+                                <input type="text" id="seriesInputGenres" placeholder="Action, Fantasy, Regression" value="Action, Fantasy"
+                                    class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                                <div class="grid grid-cols-2 gap-2 mt-2">
+                                    <div>
+                                        <label class="block text-[11px] text-slate-400 mb-1">Status</label>
+                                        <select id="seriesInputStatus" class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-2.5 py-2 text-xs text-white">
+                                            <option value="Ongoing">Ongoing</option>
+                                            <option value="Completed">Completed</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] text-slate-400 mb-1">Rating (1-10)</label>
+                                        <input type="number" id="seriesInputRating" step="0.1" min="1" max="10" value="9.8" 
+                                            class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-2.5 py-2 text-xs text-white">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Synopsis</label>
+                            <textarea id="seriesInputSynopsis" rows="3" placeholder="Brief story description..." 
+                                class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"></textarea>
+                        </div>
+
+                        <div class="pt-2 flex justify-end">
+                            <button type="submit" id="seriesSubmitBtn" class="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-purple-600/30 transition">
+                                Save & Publish Series
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-4">
+                    <h3 class="text-sm font-black uppercase tracking-wider text-slate-300">Existing Catalog Series (Click Edit to modify)</h3>
+                    <div id="adminSeriesManageList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Single Chapter Upload -->
+            <div id="tabSingleChapter" class="hidden bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
+                <form onsubmit="app.handleCreateSingleChapter(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Select Series *</label>
+                        <select id="singleChapterSeriesSelect" required class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"></select>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Chapter Name / Number *</label>
+                            <input type="text" id="singleChapterTitle" required placeholder="e.g. Chapter 42 - The Monarch Awakes" 
+                                class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Upload Page Image Files</label>
+                            <input type="file" id="singleChapterFiles" multiple accept="image/*" 
+                                class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-2 py-2 text-xs text-slate-300 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Or Enter Image Page URLs (One per line)</label>
+                        <textarea id="singleChapterUrls" rows="3" placeholder="https://domain.com/p1.jpg&#10;https://domain.com/p2.jpg" 
+                            class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"></textarea>
+                    </div>
+
+                    <div class="pt-2 flex justify-end">
+                        <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-purple-600/30 transition">
+                            Publish Chapter
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Tab 3: Dedicated MangaDex.org Live Crawler & Custom Chapter Puller -->
+            <div id="tabBulkZip" class="hidden space-y-6">
+                <div class="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1f2337] pb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-11 h-11 rounded-2xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center shrink-0">
+                                <i data-lucide="radar" class="w-6 h-6"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-base font-black text-white">MangaDex.org Live Crawler & Chapter Image Puller</h3>
+                                <p class="text-xs text-slate-400">Powered by MangaDex API v5 & At-Home Image Nodes (Houdoku architecture). Pulls real chapters and real page images—zero demo/fake chapters.</p>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-1.5">
+                            <button type="button" onclick="app.scanMangaDexCatalog('')" class="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition">
+                                Top Popular on MangaDex
+                            </button>
+                            <button type="button" onclick="app.scanMangaDexCatalog('Solo Leveling')" class="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition">
+                                Solo Leveling
+                            </button>
+                            <button type="button" onclick="app.scanMangaDexCatalog('One Piece')" class="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition">
+                                One Piece
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+                        <div class="md:col-span-5">
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Search MangaDex Title, URL, or UUID</label>
+                            <div class="relative">
+                                <input type="text" id="mangadexSearchInput" placeholder="e.g. Berserk, Chainsaw Man, or mangadex.org/title/..." 
+                                    onkeydown="if(event.key==='Enter'){event.preventDefault(); app.scanMangaDexCatalog();}"
+                                    class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl pl-9 pr-3 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-purple-500">
+                                <i data-lucide="search" class="w-4 h-4 text-purple-400 absolute left-3 top-3"></i>
+                            </div>
+                        </div>
+                        <div class="md:col-span-3">
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">How Many Chapters to Pull (Custom Input) *</label>
+                            <input type="number" id="customChapterCountInput" min="1" max="500" value="3"
+                                oninput="app.syncAllCardChapterInputs(this.value)"
+                                placeholder="Enter any number (e.g. 1, 7, 15, 50)"
+                                class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-white focus:outline-none focus:border-purple-500">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Chapter Language</label>
+                            <select id="mangadexLangSelect" class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-purple-500">
+                                <option value="en" selected>English (EN)</option>
+                                <option value="all">All Languages</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2 flex items-end">
+                            <button type="button" id="scanSourceBtn" onclick="app.scanMangaDexCatalog()" class="w-full py-2.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-purple-600/30 transition flex items-center justify-center gap-2">
+                                <i data-lucide="radar" class="w-4 h-4"></i> Search MangaDex
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="scannerWorkspace" class="hidden space-y-4 pt-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 bg-[#16192b] border border-[#262b47] px-4 py-2.5 rounded-xl">
+                            <div class="flex items-center gap-2 text-xs">
+                                <span id="scannerPulseDot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                <span id="scannerStatusLog" class="font-semibold text-slate-200">Ready to crawl MangaDex.org...</span>
+                            </div>
+                            <span id="scannedCountBadge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-purple-600/20 text-purple-300 border border-purple-500/30">0 Found</span>
+                        </div>
+                        <div id="scannedMangaGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1"></div>
+                    </div>
+                </div>
+
+                <div class="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
+                    <div class="flex items-center gap-3 border-b border-[#1f2337] pb-4">
+                        <div class="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
+                            <i data-lucide="archive" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-black text-white">Or Unpack HakuNeko / Houdoku .ZIP Archive</h3>
+                            <p class="text-xs text-slate-400">Drop a `.zip` archive to extract all chapter folders at once.</p>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">Target Series *</label>
+                            <select id="bulkZipSeriesSelect" class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"></select>
+                        </div>
+
+                        <div id="zipDropzone" class="border-2 border-dashed border-[#343a5e] hover:border-purple-500 rounded-2xl p-8 text-center transition cursor-pointer bg-[#141728]/50">
+                            <input type="file" id="bulkZipFileInput" accept=".zip,application/zip,application/x-zip-compressed" class="hidden" onchange="app.handleZipSelected(this.files[0])">
+                            <i data-lucide="archive" class="w-12 h-12 text-purple-400 mx-auto mb-3"></i>
+                            <h4 class="text-sm font-bold text-white mb-1">Click to browse or drop your .ZIP file here</h4>
+                            <p class="text-xs text-slate-400 max-w-sm mx-auto">Supports .zip with nested chapter folders</p>
+                            <span id="selectedZipFileName" class="inline-block mt-3 px-3 py-1 bg-purple-500/20 text-purple-300 rounded-lg text-xs font-mono font-bold"></span>
+                        </div>
+
+                        <div id="zipProgressSection" class="hidden space-y-2">
+                            <div class="flex justify-between text-xs font-semibold">
+                                <span id="zipStatusText" class="text-purple-400">Extracting chapters...</span>
+                                <span id="zipPercentText" class="text-slate-300">0%</span>
+                            </div>
+                            <div class="w-full bg-[#181b2e] h-3 rounded-full overflow-hidden border border-[#2b3052]">
+                                <div id="zipProgressBar" class="bg-gradient-to-r from-purple-600 via-indigo-500 to-pink-500 h-full w-0 transition-all duration-200"></div>
+                            </div>
+                            <div id="zipExtractionDetails" class="text-[11px] text-slate-400 max-h-32 overflow-y-auto space-y-1 font-mono pt-1"></div>
+                        </div>
+
+                        <div class="pt-2 flex justify-end">
+                            <button id="startZipProcessBtn" onclick="app.processBulkZip()" disabled class="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 disabled:opacity-40 hover:from-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-purple-600/30 transition">
+                                Unpack & Add Chapters
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 4: Analytics & Ad Placements -->
+            <div id="tabAnalyticsAds" class="hidden space-y-8">
+                <div class="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1f2337] pb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                                <i data-lucide="activity" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-base font-black text-white">Google Analytics Integration</h3>
+                                <p class="text-xs text-slate-400">Track real-time visitor traffic, pageviews, and chapter reads.</p>
+                            </div>
+                        </div>
+                        <label class="inline-flex items-center cursor-pointer gap-2.5">
+                            <input type="checkbox" id="gaEnabledToggle" class="sr-only peer">
+                            <div class="w-11 h-6 bg-[#1e2238] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all relative peer-checked:bg-emerald-500"></div>
+                            <span class="text-xs font-bold text-slate-200">Enable GA Tracking</span>
+                        </label>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Google Analytics Measurement ID (G-XXXXXXXXXX)</label>
+                            <input type="text" id="gaMeasurementId" placeholder="e.g. G-8K92JLMN01" 
+                                class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Or Custom Tracking Script / HTML (Optional)</label>
+                            <textarea id="gaCustomScript" rows="3" placeholder="<!-- Paste custom analytics script here -->" 
+                                class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1f2337] pb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center">
+                                <i data-lucide="megaphone" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-base font-black text-white">In-Chapter Ad Placements (4 Positions)</h3>
+                                <p class="text-xs text-slate-400">Configure ads before the 1st image, after the 5th image, after the 10th image, and after the last image.</p>
+                            </div>
+                        </div>
+                        <button type="button" onclick="app.fillSampleAds()" class="px-3.5 py-2 rounded-xl bg-[#1a1d30] hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-xs font-bold transition flex items-center gap-1.5">
+                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Load Demo Ad Banners
+                        </button>
+                    </div>
+
+                    <div id="adSlotsConfigContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-6"></div>
+
+                    <div class="pt-4 border-t border-[#1f2337] flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div class="text-xs text-slate-400 flex items-center gap-2">
+                            <i data-lucide="check-shield" class="w-4 h-4 text-emerald-400"></i>
+                            <span>Changes apply immediately to all chapters in Webtoon Scroll & Single Page modes.</span>
+                        </div>
+                        <button type="button" onclick="app.saveMonetizationSettings()" class="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-purple-600/30 transition flex items-center justify-center gap-2">
+                            <i data-lucide="save" class="w-4 h-4"></i> Save All Analytics & Ad Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ================= FOOTER ================= -->
+    <footer class="bg-[#0a0b10] border-t border-[#1a1c2b] py-10 mt-auto text-xs text-slate-500">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white">
+                    <i data-lucide="zap" class="w-4 h-4 fill-current"></i>
+                </div>
+                <div>
+                    <div class="font-black text-slate-300 text-sm">VANISCANS</div>
+                    <div>High performance manhwa & webtoon reading hub.</div>
+                </div>
+            </div>
+            <div class="flex flex-wrap justify-center gap-6 text-slate-400 font-medium">
+                <a href="javascript:void(0)" onclick="app.showHomeView()" class="hover:text-purple-400 transition">Home</a>
+                <a href="javascript:void(0)" onclick="app.scrollToCatalog()" class="hover:text-purple-400 transition">Browse Catalog</a>
+                <a href="javascript:void(0)" onclick="app.filterBookmarks()" class="hover:text-purple-400 transition">Bookmarks</a>
+            </div>
+            <div>&copy; 2026 VaniScans. All rights reserved.</div>
+        </div>
+    </footer>
+
+    <!-- Modular JS Bundle -->
+    <script src="/js/api.js"></script>
+    <script src="/js/reader.js"></script>
+    <script src="/js/main.js"></script>
+</body>
+</html>

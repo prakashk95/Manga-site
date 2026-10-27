@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: vaniscans-manga-platform
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
