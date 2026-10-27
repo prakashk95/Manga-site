@@ -92,6 +92,193 @@ class LocalDatabaseFallback {
     }
 
     async init() {
+        // Seed initial localStorage catalog if empty so mangas survive Vercel rebuilds
+        if (!localStorage.getItem('vaniscans_persistent_mangas_v4')) {
+            localStorage.setItem('vaniscans_persistent_mangas_v4', JSON.stringify([]));
+        }
+        if (!localStorage.getItem('vaniscans_persistent_chapters_v4')) {
+            localStorage.setItem('vaniscans_persistent_chapters_v4', JSON.stringify([]));
+        }
+
+        return new Promise((resolve) => {
+            try {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_MANGAS)) {
+                        db.createObjectStore(STORE_MANGAS, { keyPath: 'id' });
+                    }
+                    if (!db.objectStoreNames.contains(STORE_CHAPTERS)) {
+                        const chStore = db.createObjectStore(STORE_CHAPTERS, { keyPath: 'id' });
+                        chStore.createIndex('mangaId', 'mangaId', { unique: false });
+                    }
+                };
+                request.onsuccess = (event) => {
+                    this.db = event.target.result;
+                    // Sync IndexedDB with localStorage backup
+                    this.syncLocalStorageToIdb().then(() => resolve(this.db));
+                };
+                request.onerror = () => resolve(null);
+                request.onblocked = () => resolve(null);
+            } catch (e) {
+                resolve(null);
+            }
+        });
+    }
+
+    async syncLocalStorageToIdb() {
+        try {
+            const rawMangas = JSON.parse(localStorage.getItem('vaniscans_persistent_mangas_v4') || '[]');
+            const rawChapters = JSON.parse(localStorage.getItem('vaniscans_persistent_chapters_v4') || '[]');
+            if (rawMangas.length > 0 && this.db) {
+                const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
+                const mStore = tx.objectStore(STORE_MANGAS);
+                const cStore = tx.objectStore(STORE_CHAPTERS);
+                rawMangas.forEach(m => mStore.put(m));
+                rawChapters.forEach(c => cStore.put(c));
+            }
+        } catch (_) {}
+    }
+
+    async backupIdbToLocalStorage() {
+        try {
+            if (!this.db) return;
+            const mangas = await this.getAllMangas();
+            const chapters = [];
+            for (const m of mangas) {
+                const chs = await this.getChaptersForManga(m.id);
+                chapters.push(...chs);
+            }
+            localStorage.setItem('vaniscans_persistent_mangas_v4', JSON.stringify(mangas));
+            localStorage.setItem('vaniscans_persistent_chapters_v4', JSON.stringify(chapters));
+        } catch (_) {}
+    }
+
+    async getAllMangas() {
+        let idbList = [];
+        if (this.db) {
+            idbList = await this.tx(STORE_MANGAS, 'readonly', store => store.getAll()) || [];
+        }
+        try {
+            const lsList = JSON.parse(localStorage.getItem('vaniscans_persistent_mangas_v4') || '[]');
+            const combined = [...idbList, ...lsList];
+            const seen = new Set();
+            return combined.filter(m => {
+                if (!m || !m.id) return false;
+                if (seen.has(m.id)) return false;
+                seen.add(m.id);
+                return true;
+            });
+        } catch (_) {
+            return idbList;
+        }
+    }
+
+    async saveManga(manga) {
+        if (this.db) {
+            await this.tx(STORE_MANGAS, 'readwrite', store => store.put(manga));
+        }
+        await this.backupIdbToLocalStorage();
+        return manga;
+    }
+
+    async deleteManga(mangaId) {
+        if (this.db) {
+            const chs = await this.getChaptersForManga(mangaId);
+            await new Promise((resolve) => {
+                const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
+                tx.objectStore(STORE_MANGAS).delete(mangaId);
+                const chStore = tx.objectStore(STORE_CHAPTERS);
+                chs.forEach(c => chStore.delete(c.id));
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+            });
+        }
+        await this.backupIdbToLocalStorage();
+    }
+
+    async clearAllMangasAndChapters() {
+        if (this.db) {
+            await new Promise((resolve) => {
+                const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
+                tx.objectStore(STORE_MANGAS).clear();
+                tx.objectStore(STORE_CHAPTERS).clear();
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+            });
+        }
+        localStorage.removeItem('vaniscans_persistent_mangas_v4');
+        localStorage.removeItem('vaniscans_persistent_chapters_v4');
+    }
+
+    async getChaptersForManga(mangaId) {
+        let idbList = [];
+        if (this.db) {
+            idbList = await new Promise((resolve) => {
+                const tx = this.db.transaction(STORE_CHAPTERS, 'readonly');
+                const store = tx.objectStore(STORE_CHAPTERS);
+                const index = store.index('mangaId');
+                const req = index.getAll(mangaId);
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => resolve([]);
+            });
+        }
+        try {
+            const lsChapters = JSON.parse(localStorage.getItem('vaniscans_persistent_chapters_v4') || '[]');
+            const filteredLs = lsChapters.filter(c => c.mangaId === mangaId);
+            const combined = [...idbList, ...filteredLs];
+            const seen = new Set();
+            return combined.filter(c => {
+                if (!c || !c.id) return false;
+                if (seen.has(c.id)) return false;
+                seen.add(c.id);
+                return true;
+            });
+        } catch (_) {
+            return idbList;
+        }
+    }
+
+    async getChapter(id) {
+        if (this.db) {
+            const ch = await this.tx(STORE_CHAPTERS, 'readonly', store => store.get(id));
+            if (ch) return ch;
+        }
+        try {
+            const lsChapters = JSON.parse(localStorage.getItem('vaniscans_persistent_chapters_v4') || '[]');
+            return lsChapters.find(c => c.id === id) || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async saveChapter(chapter) {
+        if (this.db) {
+            await this.tx(STORE_CHAPTERS, 'readwrite', store => store.put(chapter));
+        }
+        await this.backupIdbToLocalStorage();
+        return chapter;
+    }
+
+    async bulkSaveChapters(chapters) {
+        if (this.db) {
+            await new Promise((resolve) => {
+                const tx = this.db.transaction(STORE_CHAPTERS, 'readwrite');
+                const store = tx.objectStore(STORE_CHAPTERS);
+                chapters.forEach(ch => store.put(ch));
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+            });
+        }
+        await this.backupIdbToLocalStorage();
+    }
+
+    tx(storeName, mode, callback) {
+    constructor() {
+        this.db = null;
+    }
+
+    async init() {
         return new Promise((resolve) => {
             try {
                 const request = indexedDB.open(DB_NAME, DB_VERSION);
