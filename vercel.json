@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/adminpanel",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/comics/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
