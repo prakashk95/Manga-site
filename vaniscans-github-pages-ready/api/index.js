@@ -3,7 +3,22 @@ const crypto = require('crypto');
 const ADMIN_USER_HASH = '059a50ce956b7ec61527c7ecc0c55b5a009dc54ab4acddce8852b46baa2aba30';
 const ADMIN_PASS_HASH = '9109551a88284a2754a704d50d6636fc596ae718df126354742f1637940bbc5a';
 const MANGADEX_API = 'https://api.mangadex.org';
-const USER_AGENT = 'VaniScans/3.0 (+https://vaniscans.online)';
+const USER_AGENT = 'VaniScans/3.1 (+https://vaniscans.online)';
+
+async function parseBody(req) {
+    if (req.body) {
+        if (typeof req.body === 'object') return req.body;
+        try { return JSON.parse(req.body); } catch (_) {}
+    }
+    return new Promise((resolve) => {
+        let data = '';
+        req.on('data', chunk => { data += chunk; });
+        req.on('end', () => {
+            try { resolve(JSON.parse(data || '{}')); } catch (_) { resolve({}); }
+        });
+        setTimeout(() => resolve({}), 2000);
+    });
+}
 
 module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,10 +36,10 @@ module.exports = async (req, res) => {
     try {
         // 1. Admin Auth
         if (req.method === 'POST' && path === '/auth/login') {
-            const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+            const body = await parseBody(req);
             const { userHash, passHash } = body;
             if (!userHash || !passHash || userHash.length !== 64 || passHash.length !== 64) {
-                return res.status(400).json({ success: false });
+                return res.status(400).json({ success: false, message: 'Invalid hashes' });
             }
             const userMatch = crypto.timingSafeEqual(
                 Buffer.from(userHash.toLowerCase(), 'utf-8'),
@@ -37,22 +52,40 @@ module.exports = async (req, res) => {
             if (userMatch && passMatch) {
                 return res.status(200).json({ success: true, token: crypto.randomBytes(24).toString('hex') });
             }
-            return res.status(401).json({ success: false });
+            return res.status(401).json({ success: false, message: 'Incorrect credentials' });
         }
 
         // 2. Binary Image Proxy (/api/mangadex/img)
         if (req.method === 'GET' && path === '/mangadex/img') {
-            const targetUrl = qs.url || '';
-            if (!targetUrl || !targetUrl.startsWith('http')) {
-                return res.status(400).send('Invalid url');
+            let targetUrl = qs.url || '';
+            if (qs.chapterId && qs.pageIndex !== undefined) {
+                const atHomeRes = await fetch(`${MANGADEX_API}/at-home/server/${encodeURIComponent(qs.chapterId)}`, {
+                    headers: { 'User-Agent': USER_AGENT }
+                });
+                const atHome = await atHomeRes.json();
+                if (atHome && atHome.baseUrl && atHome.chapter) {
+                    const idx = parseInt(qs.pageIndex, 10) || 0;
+                    const useSaver = qs.saver === '1' && atHome.chapter.dataSaver?.length > idx;
+                    const folder = useSaver ? 'data-saver' : 'data';
+                    const files = useSaver ? atHome.chapter.dataSaver : (atHome.chapter.data || atHome.chapter.dataSaver || []);
+                    if (files[idx]) {
+                        targetUrl = `${atHome.baseUrl}/${folder}/${atHome.chapter.hash}/${files[idx]}`;
+                    }
+                }
             }
+
+            if (!targetUrl || !targetUrl.startsWith('http')) {
+                return res.status(400).send('Missing valid image url');
+            }
+
             const imgRes = await fetch(targetUrl, {
                 headers: {
                     'User-Agent': USER_AGENT,
                     'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
                 }
             });
-            if (!imgRes.ok) return res.status(imgRes.status).send('Upstream error');
+
+            if (!imgRes.ok) return res.status(imgRes.status).send('Upstream image error');
             const ct = imgRes.headers.get('content-type') || 'image/jpeg';
             res.setHeader('Content-Type', ct);
             res.setHeader('Cache-Control', 'public, max-age=86400');
