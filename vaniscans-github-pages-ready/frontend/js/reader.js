@@ -46,10 +46,12 @@ class ReaderController {
         this.app.hideAllViews();
         document.getElementById('readerView').classList.remove('hidden');
 
-        // Refresh MangaDex At-Home node once when opening chapter if older than 8 minutes or missing
+        // Refresh MangaDex At-Home or MangaKatana node when opening chapter if missing or expired
         const ageMs = Date.now() - (chapter.atHomeUpdatedAt || 0);
         if (chapter.mangadexChapterId && (!chapter.pages || chapter.pages.length === 0 || ageMs > 8 * 60 * 1000)) {
             await this.refreshMangaDexChapterUrls(chapter, false);
+        } else if (chapter.mangakatanaChapterUrl && (!chapter.pages || chapter.pages.length === 0)) {
+            await this.refreshMangaKatanaChapterUrls(chapter, false);
         }
 
         this.renderReaderChapter(chapter);
@@ -98,11 +100,33 @@ class ReaderController {
         return await this.refreshPromise;
     }
 
+    async refreshMangaKatanaChapterUrls(chapter, forceShowToast = true) {
+        if (!chapter || !chapter.mangakatanaChapterUrl) return false;
+        try {
+            const pages = await this.app.api.resolveMangaKatanaChapterPages(chapter.mangakatanaChapterUrl);
+            if (pages && pages.length > 0) {
+                chapter.pages = pages;
+                chapter.pagesSaver = pages;
+                chapter.atHomeUpdatedAt = Date.now();
+                await this.app.api.saveChapter(chapter);
+                if (forceShowToast) {
+                    this.app.showToast('Refreshed MangaKatana chapter images!', 'success');
+                }
+                return true;
+            }
+        } catch (err) {
+            console.warn('Could not refresh MangaKatana pages:', err);
+        }
+        return false;
+    }
+
     async reloadCurrentChapterImages() {
         if (!this.currentChapterObj) return;
         this.app.showToast('Reloading all chapter images...', 'info');
         if (this.currentChapterObj.mangadexChapterId) {
             await this.refreshMangaDexChapterUrls(this.currentChapterObj, true);
+        } else if (this.currentChapterObj.mangakatanaChapterUrl) {
+            await this.refreshMangaKatanaChapterUrls(this.currentChapterObj, true);
         }
         this.renderReaderChapter(this.currentChapterObj);
     }

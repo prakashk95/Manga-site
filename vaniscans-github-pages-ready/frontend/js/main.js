@@ -63,6 +63,7 @@ class App {
         this.pendingZipFile = null;
         this.tempCoverDataUrl = null;
         this.lastScannedResults = [];
+        this.crawlerSource = 'mangadex';
         this.renderGridToken = 0;
     }
 
@@ -72,7 +73,7 @@ class App {
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '');
-        const shortHash = (manga.mangadexId || manga.id || '').replace(/^manga-(md-)?/, '').slice(0, 8);
+        const shortHash = (manga.mangadexId || manga.mangakatanaId || manga.id || '').replace(/^manga-(md|mk)-/, '').slice(0, 8);
         return shortHash ? `${base}-${shortHash}` : base;
     }
 
@@ -90,7 +91,7 @@ class App {
         return this.mangas.find(m => {
             const mSlug = this.getMangaSlug(m).toLowerCase();
             if (mSlug === clean || m.id.toLowerCase() === clean) return true;
-            const shortHash = (m.mangadexId || m.id || '').replace(/^manga-(md-)?/, '').slice(0, 8).toLowerCase();
+            const shortHash = (m.mangadexId || m.mangakatanaId || m.id || '').replace(/^manga-(md|mk)-/, '').slice(0, 8).toLowerCase();
             return shortHash && clean.endsWith(`-${shortHash}`);
         });
     }
@@ -238,56 +239,6 @@ class App {
             this.showAdminPanelRoute();
         } else {
             this.showToast('Invalid credentials provided', 'error');
-        }
-    }
-
-    async exportCatalogBackup() {
-        const mangas = await this.api.getAllMangas();
-        const chapters = [];
-        for (const m of mangas) {
-            const chs = await this.api.getChaptersForManga(m.id);
-            chapters.push(...chs);
-        }
-        const payload = {
-            exportedAt: new Date().toISOString(),
-            mangas,
-            chapters,
-            monetization: this.monetization
-        };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `vaniscans-catalog-backup-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        this.showToast(`Exported ${mangas.length} series & ${chapters.length} chapters!`, 'success');
-    }
-
-    async importCatalogBackup(file) {
-        if (!file) return;
-        try {
-            const text = await file.text();
-            const data = JSON.parse(text);
-            const mangas = Array.isArray(data.mangas) ? data.mangas : [];
-            const chapters = Array.isArray(data.chapters) ? data.chapters : [];
-            for (const m of mangas) {
-                await this.api.saveManga(m);
-            }
-            if (chapters.length > 0) {
-                await this.api.bulkSaveChapters(chapters);
-            }
-            this.mangas = await this.api.getAllMangas();
-            this.updateSeriesSelectOptions();
-            this.renderAdminSeriesList();
-            this.renderHeroCarousel();
-            await this.renderMangaGrid();
-            this.renderPopularSidebar();
-            this.showToast(`Restored ${mangas.length} series & ${chapters.length} chapters!`, 'success');
-        } catch (err) {
-            this.showToast('Invalid backup JSON file', 'error');
         }
     }
 
@@ -783,10 +734,42 @@ class App {
     }
 
     // =========================================================================
-    // MANGADEX.ORG LIVE CRAWLER & CUSTOM CHAPTER IMPORTER
+    // MANGADEX.ORG & MANGAKATANA.COM LIVE CRAWLER & CUSTOM CHAPTER IMPORTER
     // =========================================================================
 
-    async scanMangaDexCatalog(presetQuery = null) {
+    setCrawlerSource(source) {
+        this.crawlerSource = source === 'mangakatana' ? 'mangakatana' : 'mangadex';
+        const btnMd = document.getElementById('sourceBtnMangaDex');
+        const btnMk = document.getElementById('sourceBtnMangaKatana');
+        const searchLabel = document.getElementById('crawlerSearchLabel');
+        const searchInput = document.getElementById('mangadexSearchInput');
+        const scanBtnLabel = document.getElementById('scanSourceBtnLabel');
+        const langSelect = document.getElementById('mangadexLangSelect');
+
+        if (this.crawlerSource === 'mangakatana') {
+            if (btnMk) btnMk.className = 'px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition flex items-center gap-1.5';
+            if (btnMd) btnMd.className = 'px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#1a1d30] text-slate-300 hover:text-white border border-[#2b3052] transition flex items-center gap-1.5';
+            if (searchLabel) searchLabel.textContent = 'Search MangaKatana Title or URL';
+            if (searchInput) searchInput.placeholder = 'e.g. Naruto, Solo Leveling, or mangakatana.com/manga/...';
+            if (scanBtnLabel) scanBtnLabel.textContent = 'Search Katana';
+            if (langSelect) langSelect.disabled = true;
+        } else {
+            if (btnMd) btnMd.className = 'px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-purple-600 text-white shadow-lg shadow-purple-600/30 transition flex items-center gap-1.5';
+            if (btnMk) btnMk.className = 'px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#1a1d30] text-slate-300 hover:text-white border border-[#2b3052] transition flex items-center gap-1.5';
+            if (searchLabel) searchLabel.textContent = 'Search MangaDex Title, URL, or UUID';
+            if (searchInput) searchInput.placeholder = 'e.g. Berserk, Chainsaw Man, or mangadex.org/title/...';
+            if (scanBtnLabel) scanBtnLabel.textContent = 'Search MangaDex';
+            if (langSelect) langSelect.disabled = false;
+        }
+    }
+
+    async scanMangaDexCatalog(presetQuery = null, forceSource = null) {
+        if (forceSource) {
+            this.setCrawlerSource(forceSource);
+        }
+        const isKatana = this.crawlerSource === 'mangakatana';
+        const sourceLabel = isKatana ? 'MangaKatana.com' : 'MangaDex.org';
+
         const queryInput = document.getElementById('mangadexSearchInput');
         if (presetQuery !== null && queryInput) {
             queryInput.value = presetQuery;
@@ -801,44 +784,46 @@ class App {
         workspace.classList.remove('hidden');
         if (scanBtn) scanBtn.disabled = true;
         statusLog.textContent = keyword
-            ? `Searching MangaDex.org for "${keyword}"...`
-            : 'Fetching Top Followed Manga from MangaDex.org...';
-        countBadge.textContent = 'Querying MangaDex...';
+            ? `Searching ${sourceLabel} for "${keyword}"...`
+            : `Fetching Popular Manga from ${sourceLabel}...`;
+        countBadge.textContent = `Querying ${isKatana ? 'MangaKatana' : 'MangaDex'}...`;
         grid.innerHTML = `
             <div class="col-span-full py-12 text-center space-y-3">
                 <div class="w-10 h-10 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p class="text-xs text-slate-400">Connecting to <span class="text-purple-400 font-semibold">api.mangadex.org</span> & fetching live series metadata + cover art...</p>
+                <p class="text-xs text-slate-400">Connecting to <span class="text-purple-400 font-semibold">${sourceLabel}</span> & fetching live series metadata + cover art...</p>
             </div>
         `;
 
         try {
-            const results = await this.api.searchMangaDexCatalog(keyword);
+            const results = isKatana
+                ? await this.api.searchMangaKatanaCatalog(keyword)
+                : await this.api.searchMangaDexCatalog(keyword);
             this.lastScannedResults = results;
 
             if (!results || results.length === 0) {
-                statusLog.textContent = 'No matching series found on MangaDex.org.';
+                statusLog.textContent = `No matching series found on ${sourceLabel}.`;
                 countBadge.textContent = '0 Series';
                 grid.innerHTML = `
                     <div class="col-span-full py-10 text-center text-slate-400 text-xs">
-                        No series matched "${keyword}" on MangaDex. Try another title or paste a MangaDex UUID/URL.
+                        No series matched "${keyword}" on ${sourceLabel}. Try another title or switch source above.
                     </div>
                 `;
                 return;
             }
 
-            statusLog.textContent = `Connected to MangaDex.org — Enter how many chapters you want and click Pull Chapters`;
-            countBadge.textContent = `${results.length} MangaDex Series`;
+            statusLog.textContent = `Connected to ${sourceLabel} — Enter how many chapters you want and click Import Series`;
+            countBadge.textContent = `${results.length} ${isKatana ? 'MangaKatana' : 'MangaDex'} Series`;
             this.renderScannedMangaCards();
-            this.showToast(`Found ${results.length} series on MangaDex.org!`, 'success');
+            this.showToast(`Found ${results.length} series on ${sourceLabel}!`, 'success');
         } catch (err) {
-            statusLog.textContent = `MangaDex Crawler Error: ${err.message}`;
+            statusLog.textContent = `${sourceLabel} Crawler Error: ${err.message}`;
             countBadge.textContent = 'Error';
             grid.innerHTML = `
                 <div class="col-span-full py-10 text-center text-rose-400 text-xs">
                     ${err.message}
                 </div>
             `;
-            this.showToast(err.message || 'Failed to reach MangaDex', 'error');
+            this.showToast(err.message || `Failed to reach ${sourceLabel}`, 'error');
         } finally {
             if (scanBtn) scanBtn.disabled = false;
         }
@@ -863,17 +848,29 @@ class App {
 
         grid.innerHTML = this.lastScannedResults
             .map((item, idx) => {
+                const isKatanaItem = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
                 const alreadyExists = this.mangas.some(
-                    m => m.mangadexId === item.mangadexId || m.title.toLowerCase() === item.title.toLowerCase()
+                    m =>
+                        (item.mangadexId && m.mangadexId === item.mangadexId) ||
+                        (item.mangakatanaId && m.mangakatanaId === item.mangakatanaId) ||
+                        m.title.toLowerCase() === item.title.toLowerCase()
                 );
+                const badgeClass = isKatanaItem
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                    : 'bg-orange-500/20 text-orange-300 border-orange-500/30';
+                const badgeText = isKatanaItem ? 'MangaKatana' : 'MangaDex.org';
+                const shortId = isKatanaItem
+                    ? (item.mangakatanaId || '').slice(0, 12)
+                    : (item.mangadexId || '').slice(0, 8);
+
                 return `
                 <div class="bg-[#181b2e] border border-[#292d4b] hover:border-purple-500/50 rounded-2xl p-4 flex flex-col justify-between gap-3 transition">
                     <div class="flex gap-3.5">
-                        <img src="${item.cover}" alt="${item.title.replace(/"/g, '&quot;')}" referrerpolicy="no-referrer" class="w-20 h-28 object-cover rounded-xl shrink-0 border border-white/10" onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='https://wsrv.nl/?url='+encodeURIComponent(this.src)+'&w=400';}else{this.src='https://placehold.co/200x300/1a1d30/a855f7?text=MangaDex';}">
+                        <img src="${item.cover}" alt="${item.title.replace(/"/g, '&quot;')}" referrerpolicy="no-referrer" class="w-20 h-28 object-cover rounded-xl shrink-0 border border-white/10" onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='https://wsrv.nl/?url='+encodeURIComponent(this.src)+'&w=400';}else{this.src='https://placehold.co/200x300/1a1d30/a855f7?text=Cover';}">
                         <div class="min-w-0 flex-1 space-y-1">
                             <div class="flex items-center justify-between gap-1">
-                                <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/30 truncate">MangaDex.org</span>
-                                <span class="text-[10px] font-mono text-slate-400 truncate" title="MangaDex UUID">${item.mangadexId.slice(0, 8)}</span>
+                                <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded ${badgeClass} border truncate">${badgeText}</span>
+                                <span class="text-[10px] font-mono text-slate-400 truncate" title="${shortId}">${shortId}</span>
                             </div>
                             <h4 class="text-xs font-black text-white line-clamp-2" title="${item.title.replace(/"/g, '&quot;')}">${item.title}</h4>
                             <p class="text-[11px] text-purple-300 truncate">${item.author}</p>
@@ -906,6 +903,9 @@ class App {
         const item = this.lastScannedResults?.[idx];
         if (!item) return;
 
+        const isKatanaItem = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
+        const sourceName = isKatanaItem ? 'MangaKatana' : 'MangaDex';
+
         const cardInput = document.getElementById(`cardChCount_${idx}`);
         const globalInput = document.getElementById('customChapterCountInput');
         const desiredChapters = Math.max(
@@ -924,32 +924,51 @@ class App {
         }
         if (progEl) {
             progEl.classList.remove('hidden');
-            progEl.textContent = 'Fetching chapter feed from MangaDex...';
+            progEl.textContent = `Fetching chapter list from ${sourceName}...`;
         }
 
         try {
-            // Check if series already exists by mangadexId OR title (case-insensitive)
             let targetManga = this.mangas.find(
-                m => m.mangadexId === item.mangadexId || m.title.trim().toLowerCase() === item.title.trim().toLowerCase()
+                m =>
+                    (item.mangadexId && m.mangadexId === item.mangadexId) ||
+                    (item.mangakatanaId && m.mangakatanaId === item.mangakatanaId) ||
+                    m.title.trim().toLowerCase() === item.title.trim().toLowerCase()
             );
-            const targetMangaId = targetManga ? targetManga.id : `manga-md-${item.mangadexId.slice(0, 8)}`;
 
-            const realChapters = await this.api.crawlMangaDexChaptersWithImages(
-                item.mangadexId,
-                targetMangaId,
-                desiredChapters,
-                lang,
-                (currentNum, totalToPull, chTitle) => {
-                    const msg = `Pulling (${currentNum}/${totalToPull}): ${chTitle}`;
-                    if (progEl) progEl.textContent = msg;
-                    if (statusLog) statusLog.textContent = `[${item.title}] ${msg}`;
-                }
-            );
+            const defaultId = isKatanaItem
+                ? `manga-mk-${(item.mangakatanaId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
+                : `manga-md-${(item.mangadexId || Date.now()).toString().slice(0, 8)}`;
+            const targetMangaId = targetManga ? targetManga.id : defaultId;
+
+            const realChapters = isKatanaItem
+                ? await this.api.crawlMangaKatanaChaptersWithImages(
+                      item.mangakatanaUrl || item.mangakatanaId,
+                      targetMangaId,
+                      desiredChapters,
+                      (currentNum, totalToPull, chTitle) => {
+                          const msg = `Pulling (${currentNum}/${totalToPull}): ${chTitle}`;
+                          if (progEl) progEl.textContent = msg;
+                          if (statusLog) statusLog.textContent = `[${item.title}] ${msg}`;
+                      }
+                  )
+                : await this.api.crawlMangaDexChaptersWithImages(
+                      item.mangadexId,
+                      targetMangaId,
+                      desiredChapters,
+                      lang,
+                      (currentNum, totalToPull, chTitle) => {
+                          const msg = `Pulling (${currentNum}/${totalToPull}): ${chTitle}`;
+                          if (progEl) progEl.textContent = msg;
+                          if (statusLog) statusLog.textContent = `[${item.title}] ${msg}`;
+                      }
+                  );
 
             if (!targetManga) {
                 targetManga = {
                     id: targetMangaId,
-                    mangadexId: item.mangadexId,
+                    mangadexId: item.mangadexId || null,
+                    mangakatanaId: item.mangakatanaId || null,
+                    mangakatanaUrl: item.mangakatanaUrl || null,
                     title: item.title,
                     author: item.author,
                     cover: item.cover,
@@ -961,7 +980,9 @@ class App {
                     updatedAt: Date.now()
                 };
             } else {
-                targetManga.mangadexId = item.mangadexId;
+                if (item.mangadexId) targetManga.mangadexId = item.mangadexId;
+                if (item.mangakatanaId) targetManga.mangakatanaId = item.mangakatanaId;
+                if (item.mangakatanaUrl) targetManga.mangakatanaUrl = item.mangakatanaUrl;
                 targetManga.cover = item.cover;
                 targetManga.banner = item.cover;
                 targetManga.updatedAt = Date.now();
@@ -970,13 +991,12 @@ class App {
             await this.api.saveManga(targetManga);
             await this.api.bulkSaveChapters(realChapters);
 
-            // Reload & deduplicate catalog from storage so zero duplicates ever appear!
             const freshMangas = await this.api.getAllMangas();
             this.mangas = this.api.deduplicateMangas(freshMangas);
 
             const totalImages = realChapters.reduce((acc, c) => acc + (c.pages ? c.pages.length : 0), 0);
             if (statusLog) {
-                statusLog.textContent = `Successfully pulled ${realChapters.length} chapters (${totalImages} real page images) for "${item.title}"!`;
+                statusLog.textContent = `Successfully pulled ${realChapters.length} chapters (${totalImages} real page images) for "${item.title}" from ${sourceName}!`;
             }
 
             this.updateSeriesSelectOptions();
@@ -986,11 +1006,11 @@ class App {
             this.renderPopularSidebar();
             this.renderScannedMangaCards();
             this.showToast(
-                `Imported "${item.title}" with ${realChapters.length} real MangaDex chapters (${totalImages} pages)!`,
+                `Imported "${item.title}" with ${realChapters.length} real ${sourceName} chapters (${totalImages} pages)!`,
                 'success'
             );
         } catch (err) {
-            console.error('MangaDex Import Error:', err);
+            console.error(`${sourceName} Import Error:`, err);
             if (progEl) {
                 progEl.classList.remove('hidden');
                 progEl.className = 'text-[10px] font-mono text-rose-400 truncate text-center';
@@ -1000,7 +1020,7 @@ class App {
                 btn.disabled = false;
                 btn.innerHTML = `<span>Retry Import</span>`;
             }
-            this.showToast(err.message || 'Failed to pull chapters from MangaDex', 'error');
+            this.showToast(err.message || `Failed to pull chapters from ${sourceName}`, 'error');
         }
     }
 

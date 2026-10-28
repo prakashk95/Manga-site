@@ -86,12 +86,23 @@ function pureJsSha256(ascii) {
     return result;
 }
 
+function stripHtmlTagsClient(str) {
+    return (str || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/\s+/g, ' ').trim();
+}
+
 class LocalDatabaseFallback {
     constructor() {
         this.db = null;
     }
 
     async init() {
+        if (!localStorage.getItem('vaniscans_persistent_mangas_v4')) {
+            localStorage.setItem('vaniscans_persistent_mangas_v4', JSON.stringify([]));
+        }
+        if (!localStorage.getItem('vaniscans_persistent_chapters_v4')) {
+            localStorage.setItem('vaniscans_persistent_chapters_v4', JSON.stringify([]));
+        }
+
         return new Promise((resolve) => {
             try {
                 const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -107,7 +118,7 @@ class LocalDatabaseFallback {
                 };
                 request.onsuccess = (event) => {
                     this.db = event.target.result;
-                    resolve(this.db);
+                    this.syncLocalStorageToIdb().then(() => resolve(this.db));
                 };
                 request.onerror = () => resolve(null);
                 request.onblocked = () => resolve(null);
@@ -117,71 +128,151 @@ class LocalDatabaseFallback {
         });
     }
 
+    async syncLocalStorageToIdb() {
+        try {
+            const rawMangas = JSON.parse(localStorage.getItem('vaniscans_persistent_mangas_v4') || '[]');
+            const rawChapters = JSON.parse(localStorage.getItem('vaniscans_persistent_chapters_v4') || '[]');
+            if (rawMangas.length > 0 && this.db) {
+                const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
+                const mStore = tx.objectStore(STORE_MANGAS);
+                const cStore = tx.objectStore(STORE_CHAPTERS);
+                rawMangas.forEach(m => mStore.put(m));
+                rawChapters.forEach(c => cStore.put(c));
+            }
+        } catch (_) {}
+    }
+
+    async backupIdbToLocalStorage() {
+        try {
+            if (!this.db) return;
+            const mangas = await this.tx(STORE_MANGAS, 'readonly', store => store.getAll()) || [];
+            const chapters = [];
+            for (const m of mangas) {
+                const chs = await this.getChaptersForManga(m.id);
+                chapters.push(...chs);
+            }
+            localStorage.setItem('vaniscans_persistent_mangas_v4', JSON.stringify(mangas));
+            localStorage.setItem('vaniscans_persistent_chapters_v4', JSON.stringify(chapters));
+        } catch (_) {}
+    }
+
     async getAllMangas() {
-        if (!this.db) return [];
-        return (await this.tx(STORE_MANGAS, 'readonly', store => store.getAll())) || [];
+        let idbList = [];
+        if (this.db) {
+            idbList = (await this.tx(STORE_MANGAS, 'readonly', store => store.getAll())) || [];
+        }
+        try {
+            const lsList = JSON.parse(localStorage.getItem('vaniscans_persistent_mangas_v4') || '[]');
+            const combined = [...idbList, ...lsList];
+            const seen = new Set();
+            return combined.filter(m => {
+                if (!m || !m.id) return false;
+                if (seen.has(m.id)) return false;
+                seen.add(m.id);
+                return true;
+            });
+        } catch (_) {
+            return idbList;
+        }
     }
 
     async saveManga(manga) {
-        if (!this.db) return manga;
-        return this.tx(STORE_MANGAS, 'readwrite', store => store.put(manga));
+        if (this.db) {
+            await this.tx(STORE_MANGAS, 'readwrite', store => store.put(manga));
+        }
+        await this.backupIdbToLocalStorage();
+        return manga;
     }
 
     async deleteManga(mangaId) {
-        if (!this.db) return;
-        const chs = await this.getChaptersForManga(mangaId);
-        return new Promise((resolve) => {
-            const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
-            tx.objectStore(STORE_MANGAS).delete(mangaId);
-            const chStore = tx.objectStore(STORE_CHAPTERS);
-            chs.forEach(c => chStore.delete(c.id));
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => resolve();
-        });
+        if (this.db) {
+            const chs = await this.getChaptersForManga(mangaId);
+            await new Promise((resolve) => {
+                const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
+                tx.objectStore(STORE_MANGAS).delete(mangaId);
+                const chStore = tx.objectStore(STORE_CHAPTERS);
+                chs.forEach(c => chStore.delete(c.id));
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+            });
+        }
+        await this.backupIdbToLocalStorage();
     }
 
     async clearAllMangasAndChapters() {
-        if (!this.db) return;
-        return new Promise((resolve) => {
-            const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
-            tx.objectStore(STORE_MANGAS).clear();
-            tx.objectStore(STORE_CHAPTERS).clear();
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => resolve();
-        });
+        if (this.db) {
+            await new Promise((resolve) => {
+                const tx = this.db.transaction([STORE_MANGAS, STORE_CHAPTERS], 'readwrite');
+                tx.objectStore(STORE_MANGAS).clear();
+                tx.objectStore(STORE_CHAPTERS).clear();
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+            });
+        }
+        localStorage.removeItem('vaniscans_persistent_mangas_v4');
+        localStorage.removeItem('vaniscans_persistent_chapters_v4');
     }
 
     async getChaptersForManga(mangaId) {
-        if (!this.db) return [];
-        return new Promise((resolve) => {
-            const tx = this.db.transaction(STORE_CHAPTERS, 'readonly');
-            const store = tx.objectStore(STORE_CHAPTERS);
-            const index = store.index('mangaId');
-            const req = index.getAll(mangaId);
-            req.onsuccess = () => resolve(req.result || []);
-            req.onerror = () => resolve([]);
-        });
+        let idbList = [];
+        if (this.db) {
+            idbList = await new Promise((resolve) => {
+                const tx = this.db.transaction(STORE_CHAPTERS, 'readonly');
+                const store = tx.objectStore(STORE_CHAPTERS);
+                const index = store.index('mangaId');
+                const req = index.getAll(mangaId);
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => resolve([]);
+            });
+        }
+        try {
+            const lsChapters = JSON.parse(localStorage.getItem('vaniscans_persistent_chapters_v4') || '[]');
+            const filteredLs = lsChapters.filter(c => c.mangaId === mangaId);
+            const combined = [...idbList, ...filteredLs];
+            const seen = new Set();
+            return combined.filter(c => {
+                if (!c || !c.id) return false;
+                if (seen.has(c.id)) return false;
+                seen.add(c.id);
+                return true;
+            });
+        } catch (_) {
+            return idbList;
+        }
     }
 
     async getChapter(id) {
-        if (!this.db) return null;
-        return this.tx(STORE_CHAPTERS, 'readonly', store => store.get(id));
+        if (this.db) {
+            const ch = await this.tx(STORE_CHAPTERS, 'readonly', store => store.get(id));
+            if (ch) return ch;
+        }
+        try {
+            const lsChapters = JSON.parse(localStorage.getItem('vaniscans_persistent_chapters_v4') || '[]');
+            return lsChapters.find(c => c.id === id) || null;
+        } catch (_) {
+            return null;
+        }
     }
 
     async saveChapter(chapter) {
-        if (!this.db) return chapter;
-        return this.tx(STORE_CHAPTERS, 'readwrite', store => store.put(chapter));
+        if (this.db) {
+            await this.tx(STORE_CHAPTERS, 'readwrite', store => store.put(chapter));
+        }
+        await this.backupIdbToLocalStorage();
+        return chapter;
     }
 
     async bulkSaveChapters(chapters) {
-        if (!this.db) return;
-        return new Promise((resolve) => {
-            const tx = this.db.transaction(STORE_CHAPTERS, 'readwrite');
-            const store = tx.objectStore(STORE_CHAPTERS);
-            chapters.forEach(ch => store.put(ch));
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => resolve();
-        });
+        if (this.db) {
+            await new Promise((resolve) => {
+                const tx = this.db.transaction(STORE_CHAPTERS, 'readwrite');
+                const store = tx.objectStore(STORE_CHAPTERS);
+                chapters.forEach(ch => store.put(ch));
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+            });
+        }
+        await this.backupIdbToLocalStorage();
     }
 
     tx(storeName, mode, callback) {
@@ -208,7 +299,6 @@ class ApiService {
 
     async init() {
         await this.localDb.init();
-        // Check if Express backend (/api/mangas) is running
         try {
             const res = await fetch(`${API_BASE}/mangas`, { signal: AbortSignal.timeout(1200) });
             if (res.ok) {
@@ -244,14 +334,11 @@ class ApiService {
         }
     }
 
-    /**
-     * Deduplicates manga list by id, mangadexId, and lowercase title,
-     * and filters out any series the admin explicitly deleted!
-     */
     deduplicateMangas(list) {
         const deletedIds = new Set(this.getDeletedIds());
         const seenIds = new Set();
         const seenMdIds = new Set();
+        const seenMkIds = new Set();
         const seenTitles = new Set();
         const clean = [];
 
@@ -261,14 +348,17 @@ class ApiService {
 
             const normId = m.id.trim();
             const normMdId = m.mangadexId ? m.mangadexId.trim() : null;
+            const normMkId = m.mangakatanaId ? m.mangakatanaId.trim() : null;
             const normTitle = m.title.trim().toLowerCase();
 
             if (seenIds.has(normId)) continue;
             if (normMdId && seenMdIds.has(normMdId)) continue;
+            if (normMkId && seenMkIds.has(normMkId)) continue;
             if (seenTitles.has(normTitle)) continue;
 
             seenIds.add(normId);
             if (normMdId) seenMdIds.add(normMdId);
+            if (normMkId) seenMkIds.add(normMkId);
             seenTitles.add(normTitle);
             clean.push(m);
         }
@@ -276,7 +366,6 @@ class ApiService {
     }
 
     async fetchMangaDexJson(proxyEndpoint, directMangaDexUrl) {
-        // 1. Try built-in Server / Serverless Function (/api/mangadex/...) on Vercel, Netlify, Render, or Express
         if (proxyEndpoint) {
             try {
                 const proxyRes = await fetch(proxyEndpoint, { signal: AbortSignal.timeout(8000) });
@@ -293,7 +382,6 @@ class ApiService {
             } catch (_) {}
         }
 
-        // 2. Race direct API + multiple high-speed relays in parallel using Promise.any() so one slow proxy NEVER causes a timeout!
         const fetchCandidate = async (url, unwrap = false) => {
             const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
             if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -321,27 +409,28 @@ class ApiService {
     }
 
     async authenticateAdmin(username, password) {
-        const userHash = (await sha256Hash(username.trim())).toLowerCase();
-        const passHash = (await sha256Hash(password)).toLowerCase();
+        const cleanUser = (username || '').trim();
+        const userHash = (await sha256Hash(cleanUser)).toLowerCase();
+        const userLowerHash = (await sha256Hash(cleanUser.toLowerCase())).toLowerCase();
+        const passHash = (await sha256Hash(password || '')).toLowerCase();
 
-        // Always check local SHA-256 match first for instant, bulletproof admin login
-        if (userHash === ADMIN_USER_SHA256 && passHash === ADMIN_PASS_SHA256) {
+        // 1. Instant local SHA-256 verification (works offline, on static hosts, and across all serverless deployments)
+        if ((userHash === ADMIN_USER_SHA256 || userLowerHash === ADMIN_USER_SHA256) && passHash === ADMIN_PASS_SHA256) {
             return true;
         }
 
-        if (this.useBackend || true) {
-            try {
-                const res = await fetch(`${API_BASE}/auth/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userHash, passHash })
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    return !!data.success;
-                }
-            } catch (_) {}
-        }
+        // 2. Also verify against backend / serverless endpoint if available
+        try {
+            const res = await fetch(`${API_BASE}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userHash, passHash })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.success) return true;
+            }
+        } catch (_) {}
 
         return false;
     }
@@ -448,7 +537,7 @@ class ApiService {
     }
 
     // =========================================================================
-    // HOUDOKU-INSPIRED MANGADEX CRAWLER (Search, Chapter Feed & Page Resolver)
+    // 1. MANGADEX.ORG LIVE CRAWLER (Search, Chapter Feed & Page Resolver)
     // =========================================================================
 
     async searchMangaDexCatalog(rawQuery = '') {
@@ -650,10 +739,6 @@ class ApiService {
         return finalChapters;
     }
 
-    /**
-     * Queries https://api.mangadex.org/at-home/server/<chapterId>
-     * Also builds canonical uploads.mangadex.org URLs (`data-saver` & `data`) which do NOT expire after 15 minutes!
-     */
     async resolveMangaDexChapterPagesDetailed(mangadexChapterId) {
         const directUrl = `https://api.mangadex.org/at-home/server/${encodeURIComponent(mangadexChapterId)}`;
         const proxyUrl = `${API_BASE}/mangadex/pages?chapterId=${encodeURIComponent(mangadexChapterId)}`;
@@ -668,11 +753,9 @@ class ApiService {
         const dataFiles = atHome.chapter.data || [];
         const saverFiles = atHome.chapter.dataSaver || [];
 
-        // Use data-saver first if available because data-saver JPGs are 5x smaller and rarely time out on volunteer nodes!
         const primaryFolder = saverFiles.length > 0 ? 'data-saver' : 'data';
         const primaryFiles = saverFiles.length > 0 ? saverFiles : dataFiles;
 
-        // Canonical uploads.mangadex.org origin URLs (never expire like volunteer node URLs)
         const pages = primaryFiles.map(
             fileName => `https://uploads.mangadex.org/${primaryFolder}/${hash}/${fileName}`
         );
@@ -686,6 +769,266 @@ class ApiService {
     async resolveMangaDexChapterPages(mangadexChapterId, preferDataSaver = true) {
         const detailed = await this.resolveMangaDexChapterPagesDetailed(mangadexChapterId);
         return preferDataSaver ? detailed.pages : detailed.pagesSaver;
+    }
+
+    // =========================================================================
+    // 2. MANGAKATANA.COM LIVE CRAWLER (Search, Chapter List & Page Resolver)
+    // =========================================================================
+
+    async fetchMangaKatanaHtmlWithFallback(targetUrl) {
+        const fetchHtmlCandidate = async (url, unwrapJson = false) => {
+            const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            if (unwrapJson) {
+                const j = await res.json();
+                if (j && typeof j.contents === 'string' && j.contents.length > 200) return j.contents;
+                throw new Error('Empty contents');
+            }
+            const text = await res.text();
+            if (text && text.length > 200) return text;
+            throw new Error('Empty html');
+        };
+
+        return await Promise.any([
+            fetchHtmlCandidate(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, false),
+            fetchHtmlCandidate(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, false),
+            fetchHtmlCandidate(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, true),
+            fetchHtmlCandidate(`https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, false)
+        ]);
+    }
+
+    parseClientMangaKatanaSearch(html, fallbackUrl = '', fallbackQuery = '') {
+        const results = [];
+        if (html.includes('id="single_book"') || html.includes("id='single_book'")) {
+            const titleMatch = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
+            const coverMatch = html.match(/<div[^>]*class="[^"]*div_cover[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i) ||
+                               html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i);
+            const ogUrlMatch = html.match(/<meta[^>]+property="og:url"[^>]+content="([^"]+)"/i);
+            const authorMatch = html.match(/<div[^>]*class="[^"]*author[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+            const statusMatch = html.match(/<div[^>]*class="[^"]*status[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+            const summaryMatch = html.match(/<div[^>]*class="[^"]*summary[^"]*"[^>]*>[\s\S]*?<p>([\s\S]*?)<\/p>/i);
+            const genresBlock = html.match(/<div[^>]*class="[^"]*genres[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+
+            const genres = [];
+            if (genresBlock) {
+                const gRegex = /<a[^>]*>([^<]+)<\/a>/gi;
+                let gm;
+                while ((gm = gRegex.exec(genresBlock[1])) !== null) {
+                    genres.push(stripHtmlTagsClient(gm[1]));
+                }
+            }
+
+            const mangaUrl = ogUrlMatch ? ogUrlMatch[1].trim() : fallbackUrl;
+            const slug = mangaUrl.split('/manga/')[1]?.replace(/\/+$/, '') || ('mk-' + Date.now());
+
+            results.push({
+                mangakatanaId: slug,
+                mangakatanaUrl: mangaUrl || `https://mangakatana.com/manga/${slug}`,
+                sourceHost: 'mangakatana.com',
+                title: titleMatch ? stripHtmlTagsClient(titleMatch[1]) : (fallbackQuery || 'MangaKatana Series'),
+                author: authorMatch ? stripHtmlTagsClient(authorMatch[1]) : 'MangaKatana Creator',
+                cover: coverMatch ? coverMatch[1].trim() : 'https://placehold.co/400x600/1a1d30/a855f7?text=MangaKatana',
+                genres: genres.length > 0 ? genres.slice(0, 4) : ['Action', 'Manga'],
+                status: statusMatch && /completed/i.test(statusMatch[1]) ? 'Completed' : 'Ongoing',
+                rating: '9.6',
+                synopsis: summaryMatch ? stripHtmlTagsClient(summaryMatch[1]) : 'Imported directly from MangaKatana.com.'
+            });
+            return results;
+        }
+
+        const itemSplit = html.split(/<div[^>]+class="[^"]*\bitem\b[^"]*"[^>]+data-id="/i);
+        for (let i = 1; i < itemSplit.length; i++) {
+            const block = itemSplit[i];
+            const titleLink = block.match(/<h3[^>]*class="[^"]*title[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+            if (!titleLink) continue;
+
+            const mangaUrl = titleLink[1].trim();
+            const title = stripHtmlTagsClient(titleLink[2]);
+            const slug = mangaUrl.split('/manga/')[1]?.replace(/\/+$/, '') || '';
+            if (!slug) continue;
+
+            const imgMatch = block.match(/<div[^>]*class="[^"]*wrap_img[^"]*"[\s\S]*?<img[^>]+src="([^"]+)"/i) ||
+                             block.match(/<img[^>]+src="([^"]+)"/i);
+            const statusMatch = block.match(/<span[^>]*class="[^"]*status[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+            const summaryMatch = block.match(/<div[^>]*class="[^"]*summary[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+            const genresBlock = block.match(/<div[^>]*class="[^"]*genres[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+
+            const genres = [];
+            if (genresBlock) {
+                const gRegex = /<a[^>]*>([^<]+)<\/a>/gi;
+                let gm;
+                while ((gm = gRegex.exec(genresBlock[1])) !== null) {
+                    genres.push(stripHtmlTagsClient(gm[1]));
+                }
+            }
+
+            results.push({
+                mangakatanaId: slug,
+                mangakatanaUrl: mangaUrl.startsWith('http') ? mangaUrl : `https://mangakatana.com${mangaUrl}`,
+                sourceHost: 'mangakatana.com',
+                title: title || slug,
+                author: 'MangaKatana Creator',
+                cover: imgMatch ? imgMatch[1].trim() : 'https://placehold.co/400x600/1a1d30/a855f7?text=MangaKatana',
+                genres: genres.length > 0 ? genres.slice(0, 4) : ['Action', 'Manga'],
+                status: statusMatch && /completed/i.test(statusMatch[1]) ? 'Completed' : 'Ongoing',
+                rating: '9.6',
+                synopsis: summaryMatch ? stripHtmlTagsClient(summaryMatch[1]) : 'Imported directly from MangaKatana.com.'
+            });
+        }
+        return results;
+    }
+
+    parseClientMangaKatanaChapters(html) {
+        const chapters = [];
+        const seenUrls = new Set();
+        const rowRegex = /<div[^>]*class="[^"]*\bchapter\b[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        let match;
+        while ((match = rowRegex.exec(html)) !== null) {
+            const chUrl = match[1].trim();
+            if (!chUrl || seenUrls.has(chUrl)) continue;
+            seenUrls.add(chUrl);
+
+            const rawTitle = stripHtmlTagsClient(match[2]);
+            const chSlug = chUrl.split('/').filter(Boolean).pop() || '';
+            const numFromSlug = chSlug.match(/c(\d+(\.\d+)?)/i);
+            const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/(\d+(\.\d+)?)/);
+            const chNum = numFromSlug ? parseFloat(numFromSlug[1]) : (numFromTitle ? parseFloat(numFromTitle[1]) : (chapters.length + 1));
+
+            chapters.push({
+                id: chSlug || `ch-${chapters.length + 1}`,
+                url: chUrl.startsWith('http') ? chUrl : `https://mangakatana.com${chUrl}`,
+                title: rawTitle || `Chapter ${chNum}`,
+                number: isNaN(chNum) ? (chapters.length + 1) : chNum
+            });
+        }
+        chapters.sort((a, b) => (a.number || 0) - (b.number || 0));
+        return chapters;
+    }
+
+    parseClientMangaKatanaPages(html) {
+        const scriptArrayRegex = /var\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
+        let bestPages = [];
+        let match;
+        while ((match = scriptArrayRegex.exec(html)) !== null) {
+            const varName = match[1];
+            const rawList = match[2];
+            const urls = rawList
+                .split(',')
+                .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
+                .filter(u => /^https?:\/\/.+\.(jpg|jpeg|png|webp|avif|gif)/i.test(u) || u.includes('mangakatana'));
+            if (urls.length > bestPages.length || varName === 'thzq' || varName === 'ytaw') {
+                if (urls.length > 0) {
+                    bestPages = urls;
+                    if (varName === 'thzq' && urls.length > 2) break;
+                }
+            }
+        }
+        return bestPages;
+    }
+
+    async searchMangaKatanaCatalog(rawQuery = '') {
+        const query = rawQuery.trim();
+        try {
+            const res = await fetch(`${API_BASE}/mangakatana/search?q=${encodeURIComponent(query)}`, {
+                signal: AbortSignal.timeout(9000)
+            });
+            if (res.ok) {
+                const json = await res.json();
+                if (json && Array.isArray(json.data)) return json.data;
+            }
+        } catch (_) {}
+
+        let targetUrl = 'https://mangakatana.com/manga';
+        if (query.startsWith('http') && query.includes('mangakatana.com/manga/')) {
+            targetUrl = query;
+        } else if (query) {
+            targetUrl = `https://mangakatana.com/?search=${encodeURIComponent(query)}&search_by=book_name`;
+        }
+        const html = await this.fetchMangaKatanaHtmlWithFallback(targetUrl);
+        return this.parseClientMangaKatanaSearch(html, targetUrl, query);
+    }
+
+    async fetchMangaKatanaChapterList(mangaUrlOrSlug) {
+        const cleanUrl = mangaUrlOrSlug.startsWith('http')
+            ? mangaUrlOrSlug
+            : `https://mangakatana.com/manga/${mangaUrlOrSlug.replace(/^\/+/, '')}`;
+        try {
+            const res = await fetch(`${API_BASE}/mangakatana/chapters?url=${encodeURIComponent(cleanUrl)}`, {
+                signal: AbortSignal.timeout(9000)
+            });
+            if (res.ok) {
+                const json = await res.json();
+                if (json && Array.isArray(json.data) && json.data.length > 0) return json.data;
+            }
+        } catch (_) {}
+
+        const html = await this.fetchMangaKatanaHtmlWithFallback(cleanUrl);
+        return this.parseClientMangaKatanaChapters(html);
+    }
+
+    async resolveMangaKatanaChapterPages(chapterUrl) {
+        try {
+            const res = await fetch(`${API_BASE}/mangakatana/pages?url=${encodeURIComponent(chapterUrl)}`, {
+                signal: AbortSignal.timeout(10000)
+            });
+            if (res.ok) {
+                const json = await res.json();
+                if (json && Array.isArray(json.pages) && json.pages.length > 0) return json.pages;
+            }
+        } catch (_) {}
+
+        const html = await this.fetchMangaKatanaHtmlWithFallback(chapterUrl);
+        return this.parseClientMangaKatanaPages(html);
+    }
+
+    async crawlMangaKatanaChaptersWithImages(mangaUrlOrSlug, targetMangaId, desiredCount, onProgress = null) {
+        const maxChapters = Math.max(1, parseInt(desiredCount, 10) || 1);
+        const allChapters = await this.fetchMangaKatanaChapterList(mangaUrlOrSlug);
+
+        if (!allChapters || allChapters.length === 0) {
+            throw new Error('No chapters found on MangaKatana for this series.');
+        }
+
+        const candidates = allChapters.slice(0, maxChapters + 2);
+        const finalChapters = [];
+
+        for (let i = 0; i < candidates.length && finalChapters.length < maxChapters; i++) {
+            const chObj = candidates[i];
+            const chTitle = chObj.title || `Chapter ${chObj.number || (finalChapters.length + 1)}`;
+
+            if (typeof onProgress === 'function') {
+                onProgress(finalChapters.length + 1, Math.min(maxChapters, candidates.length), chTitle);
+            }
+
+            try {
+                const pages = await this.resolveMangaKatanaChapterPages(chObj.url);
+                if (pages && pages.length > 0) {
+                    finalChapters.push({
+                        id: `${targetMangaId}-mk-${chObj.id}`,
+                        mangakatanaChapterUrl: chObj.url,
+                        mangaId: targetMangaId,
+                        title: chTitle,
+                        number: typeof chObj.number === 'number' && !isNaN(chObj.number) ? chObj.number : (finalChapters.length + 1),
+                        pages,
+                        pagesSaver: pages,
+                        atHomeUpdatedAt: Date.now(),
+                        createdAt: Date.now() - (maxChapters - finalChapters.length) * 60000
+                    });
+                }
+            } catch (chErr) {
+                console.warn(`Skipping MangaKatana chapter ${chObj.url}:`, chErr);
+            }
+
+            if (finalChapters.length < maxChapters && i < candidates.length - 1) {
+                await new Promise(r => setTimeout(r, 200));
+            }
+        }
+
+        if (finalChapters.length === 0) {
+            throw new Error('Could not extract chapter images from MangaKatana. Try another series or retry.');
+        }
+
+        return finalChapters;
     }
 }
 

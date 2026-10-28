@@ -11,6 +11,12 @@ router.get('/mangadex/feed', mangaController.getMangaDexFeed);
 router.get('/mangadex/pages', mangaController.getMangaDexPages);
 router.get('/mangadex/img', mangaController.proxyMangaDexImage);
 
+// MangaKatana Live Crawler & Binary Image Proxy Routes
+router.get('/mangakatana/search', mangaController.searchMangaKatana);
+router.get('/mangakatana/chapters', mangaController.getMangaKatanaChapters);
+router.get('/mangakatana/pages', mangaController.getMangaKatanaPages);
+router.get('/mangakatana/img', mangaController.proxyMangaDexImage);
+
 // Dynamic Manga Series Routes
 router.get('/mangas', mangaController.getAllMangas);
 router.post('/mangas', mangaController.saveManga);
