@@ -117,8 +117,14 @@ function parseMangaKatanaChaptersHtml(html) {
         seenUrls.add(chUrl);
 
         const rawTitle = stripHtmlTags(match[2]);
+        const lowerTitle = rawTitle.toLowerCase();
+        
+        // Exclude non-chapter rows (e.g. promotional banners, volume covers, author notes, external announcements)
+        if (lowerTitle.includes('volume') && !lowerTitle.includes('chapter') && !lowerTitle.match(/ch\./i)) {
+            // keep only if it explicitly looks like a chapter or numbered release
+        }
+
         const chSlug = chUrl.split('/').filter(Boolean).pop() || '';
-        // Match /c10, /c10.5, /c0.1 or Chapter 10 in title
         const numFromSlug = chSlug.match(/^c(\d+(\.\d+)?)$/i) || chSlug.match(/c(\d+(\.\d+)?)/i);
         const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/^(\d+(\.\d+)?)/);
         const parsedNum = numFromSlug ? parseFloat(numFromSlug[1]) : (numFromTitle ? parseFloat(numFromTitle[1]) : null);
@@ -131,21 +137,31 @@ function parseMangaKatanaChaptersHtml(html) {
         });
     }
 
-    // MangaKatana table is ALWAYS ordered newest-to-oldest (top to bottom).
-    // Reversing gives exact chronological order (Chapter 1 first, latest chapter last)
-    // and guarantees no bonus chapter gets assigned a fake number like 1196!
+    // MangaKatana lists newest chapters first (top to bottom).
+    // Reversing gives true chronological order (Chapter 1 first, latest chapter last).
     rawChapters.reverse();
 
-    return rawChapters.map((ch, idx) => {
-        const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (idx + 1);
-        return {
+    // Deduplicate chapter numbers to prevent duplicates or mixed chapters from other series
+    const finalChapters = [];
+    const seenNumbers = new Set();
+
+    for (let idx = 0; idx < rawChapters.length; idx++) {
+        const ch = rawChapters[idx];
+        const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
+        
+        if (seenNumbers.has(num)) continue;
+        seenNumbers.add(num);
+
+        finalChapters.push({
             id: ch.id,
             url: ch.url,
             title: ch.title || `Chapter ${num}`,
             number: num,
-            seqIndex: idx + 1
-        };
-    });
+            seqIndex: finalChapters.length + 1
+        });
+    }
+
+    return finalChapters;
 }
 
 function parseMangaKatanaPagesHtml(html) {

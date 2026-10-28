@@ -910,18 +910,23 @@ class ApiService {
                 parsedNum
             });
         }
-        // Reverse MangaKatana's newest-first table so Chapter 1 is first and latest chapter is last
         rawChapters.reverse();
-        return rawChapters.map((ch, idx) => {
-            const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (idx + 1);
-            return {
+        const finalChapters = [];
+        const seenNumbers = new Set();
+        for (let idx = 0; idx < rawChapters.length; idx++) {
+            const ch = rawChapters[idx];
+            const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
+            if (seenNumbers.has(num)) continue;
+            seenNumbers.add(num);
+            finalChapters.push({
                 id: ch.id,
                 url: ch.url,
                 title: ch.title || `Chapter ${num}`,
                 number: num,
-                seqIndex: idx + 1
-            };
-        });
+                seqIndex: finalChapters.length + 1
+            });
+        }
+        return finalChapters;
     }
 
     parseClientMangaKatanaPages(html) {
