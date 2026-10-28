@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const ADMIN_USER_HASH = '059a50ce956b7ec61527c7ecc0c55b5a009dc54ab4acddce8852b46baa2aba30';
 const ADMIN_PASS_HASH = '9109551a88284a2754a704d50d6636fc596ae718df126354742f1637940bbc5a';
@@ -13,14 +15,59 @@ const MK_HEADERS = {
     'Referer': 'https://mangakatana.com/'
 };
 
+const LOCAL_DB_PATH = path.join(__dirname, '../backend/data/manga.json');
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.replace(/\/$/, '') : '';
+const FIREBASE_SECRET = process.env.FIREBASE_SECRET || '';
+
+// Firebase & Local Database Helpers
+async function readDB() {
+    if (FIREBASE_DB_URL) {
+        try {
+            const authParam = FIREBASE_SECRET ? `?auth=${FIREBASE_SECRET}` : '';
+            const res = await fetch(`${FIREBASE_DB_URL}/db.json${authParam}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data) return data;
+            }
+        } catch (e) {
+            console.error('Firebase readDB error:', e.message);
+        }
+    }
+    try {
+        if (fs.existsSync(LOCAL_DB_PATH)) {
+            const raw = fs.readFileSync(LOCAL_DB_PATH, 'utf-8');
+            return JSON.parse(raw);
+        }
+    } catch (e) {}
+    return { mangas: [], chapters: [], comments: {}, monetization: {} };
+}
+
+async function writeDB(dbData) {
+    if (FIREBASE_DB_URL) {
+        try {
+            const authParam = FIREBASE_SECRET ? `?auth=${FIREBASE_SECRET}` : '';
+            const res = await fetch(`${FIREBASE_DB_URL}/db.json${authParam}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(dbData)
+            });
+            if (res.ok) return true;
+        } catch (e) {
+            console.error('Firebase writeDB error:', e.message);
+        }
+    }
+    try {
+        fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(dbData, null, 2), 'utf-8');
+    } catch (e) {}
+    return true;
+}
+
 function stripHtmlTags(str) {
     return (str || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/\s+/g, ' ').trim();
 }
 
 function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
     const results = [];
-
-    // Case 1: Redirected directly to single manga page (#single_book)
     if (html.includes('id="single_book"') || html.includes("id='single_book'")) {
         const titleMatch = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
         const coverMatch = html.match(/<div[^>]*class="[^"]*div_cover[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i) ||
@@ -58,7 +105,6 @@ function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
         return results;
     }
 
-    // Case 2: Search results grid (#book_list > .item)
     const itemSplit = html.split(/<div[^>]+class="[^"]*\bitem\b[^"]*"[^>]+data-id="/i);
     for (let i = 1; i < itemSplit.length; i++) {
         const block = itemSplit[i];
@@ -114,13 +160,6 @@ function parseMangaKatanaChaptersHtml(html) {
         seenUrls.add(chUrl);
 
         const rawTitle = stripHtmlTags(match[2]);
-        const lowerTitle = rawTitle.toLowerCase();
-        
-        // Exclude non-chapter rows (e.g. promotional banners, volume covers, author notes, external announcements)
-        if (lowerTitle.includes('volume') && !lowerTitle.includes('chapter') && !lowerTitle.match(/ch\./i)) {
-            // keep only if it explicitly looks like a chapter or numbered release
-        }
-
         const chSlug = chUrl.split('/').filter(Boolean).pop() || '';
         const numFromSlug = chSlug.match(/^c(\d+(\.\d+)?)$/i) || chSlug.match(/c(\d+(\.\d+)?)/i);
         const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/^(\d+(\.\d+)?)/);
@@ -134,18 +173,13 @@ function parseMangaKatanaChaptersHtml(html) {
         });
     }
 
-    // MangaKatana lists newest chapters first (top to bottom).
-    // Reversing gives true chronological order (Chapter 1 first, latest chapter last).
     rawChapters.reverse();
-
-    // Deduplicate chapter numbers to prevent duplicates or mixed chapters from other series
     const finalChapters = [];
     const seenNumbers = new Set();
 
     for (let idx = 0; idx < rawChapters.length; idx++) {
         const ch = rawChapters[idx];
         const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
-        
         if (seenNumbers.has(num)) continue;
         seenNumbers.add(num);
 
@@ -162,7 +196,6 @@ function parseMangaKatanaChaptersHtml(html) {
 }
 
 function parseMangaKatanaPagesHtml(html) {
-    // 1. Primary: Check MangaKatana's standard JS image arrays (`thzq`, `ytaw`, `htnc`)
     const scriptArrayRegex = /(?:var|let|const)\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
     let bestPages = [];
     let match;
@@ -185,7 +218,6 @@ function parseMangaKatanaPagesHtml(html) {
 
     if (bestPages.length > 0) return bestPages;
 
-    // 2. Fallback: Match any `data-src` inside `#imgs` reader container
     const dataSrcRegex = /<div[^>]*id="imgs"[\s\S]*$/i;
     const imgsSection = html.match(dataSrcRegex)?.[0] || html;
     const imgTagRegex = /data-src=["'](https?:\/\/[^"']+)["']/gi;
@@ -217,7 +249,7 @@ async function parseBody(req) {
 module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
 
     if (req.method === 'OPTIONS') {
         return res.status(204).end();
@@ -249,7 +281,7 @@ module.exports = async (req, res) => {
             return res.status(401).json({ success: false, message: 'Incorrect credentials' });
         }
 
-        // 2. Binary Image Proxy (/api/mangadex/img & /api/mangakatana/img)
+        // 2. Image Proxy
         if (req.method === 'GET' && (path === '/mangadex/img' || path === '/mangakatana/img')) {
             let targetUrl = qs.url || '';
             if (qs.chapterId && qs.pageIndex !== undefined) {
@@ -277,9 +309,7 @@ module.exports = async (req, res) => {
                 'User-Agent': isKatana ? MK_HEADERS['User-Agent'] : USER_AGENT,
                 'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
             };
-            if (isKatana) {
-                reqHeaders['Referer'] = 'https://mangakatana.com/';
-            }
+            if (isKatana) reqHeaders['Referer'] = 'https://mangakatana.com/';
 
             const imgRes = await fetch(targetUrl, { headers: reqHeaders });
             if (!imgRes.ok) return res.status(imgRes.status).send('Upstream image error');
@@ -290,7 +320,7 @@ module.exports = async (req, res) => {
             return res.status(200).send(Buffer.from(ab));
         }
 
-        // 3. MangaDex Search (/api/mangadex/search)
+        // 3. MangaDex Search
         if (req.method === 'GET' && path === '/mangadex/search') {
             const query = (qs.q || '').trim();
             const limit = Math.min(parseInt(qs.limit || '24', 10), 50);
@@ -324,7 +354,7 @@ module.exports = async (req, res) => {
             return res.status(upstream.status).json(data);
         }
 
-        // 4. MangaDex Chapter Feed (/api/mangadex/feed)
+        // 4. MangaDex Feed
         if (req.method === 'GET' && path === '/mangadex/feed') {
             const mangaId = qs.mangaId;
             const limit = Math.min(parseInt(qs.limit || '100', 10), 500);
@@ -351,7 +381,7 @@ module.exports = async (req, res) => {
             return res.status(upstream.status).json(data);
         }
 
-        // 5. MangaDex At-Home Pages (/api/mangadex/pages)
+        // 5. MangaDex Pages
         if (req.method === 'GET' && path === '/mangadex/pages') {
             const chapterId = qs.chapterId;
             const url = `${MANGADEX_API}/at-home/server/${encodeURIComponent(chapterId)}`;
@@ -360,7 +390,7 @@ module.exports = async (req, res) => {
             return res.status(upstream.status).json(data);
         }
 
-        // 6. MangaKatana Search (/api/mangakatana/search)
+        // 6. MangaKatana Search
         if (req.method === 'GET' && path === '/mangakatana/search') {
             const query = (qs.q || '').trim();
             let targetUrl = `${MANGAKATANA_BASE}/manga`;
@@ -375,7 +405,7 @@ module.exports = async (req, res) => {
             return res.status(200).json({ result: 'ok', data: results });
         }
 
-        // 7. MangaKatana Chapter List (/api/mangakatana/chapters)
+        // 7. MangaKatana Chapters
         if (req.method === 'GET' && path === '/mangakatana/chapters') {
             const rawUrl = (qs.url || qs.slug || '').trim();
             const targetUrl = rawUrl.startsWith('http') ? rawUrl : `${MANGAKATANA_BASE}/manga/${rawUrl.replace(/^\/+/, '')}`;
@@ -385,7 +415,7 @@ module.exports = async (req, res) => {
             return res.status(200).json({ result: 'ok', data: chapters });
         }
 
-        // 8. MangaKatana Chapter Pages (/api/mangakatana/pages)
+        // 8. MangaKatana Pages
         if (req.method === 'GET' && path === '/mangakatana/pages') {
             const targetUrl = (qs.url || '').trim();
             if (!targetUrl.startsWith('http')) {
@@ -397,28 +427,131 @@ module.exports = async (req, res) => {
             return res.status(200).json({ result: 'ok', pages });
         }
 
-        // 9. Chapter Comments (/api/comments/:chapterId)
+        // 9. Database CRUD endpoints (Mangas & Chapters)
+        const db = await readDB();
+
+        // GET /manga
+        if (req.method === 'GET' && (path === '/manga' || path === '/')) {
+            return res.status(200).json(db.mangas || []);
+        }
+
+        // POST /manga (Save Manga)
+        if (req.method === 'POST' && (path === '/manga' || path === '')) {
+            const manga = await parseBody(req);
+            if (!manga || !manga.id) {
+                return res.status(400).json({ error: 'Invalid manga payload' });
+            }
+            const idx = (db.mangas || []).findIndex(
+                m => m.id === manga.id ||
+                     (manga.mangadexId && m.mangadexId === manga.mangadexId) ||
+                     (manga.mangakatanaId && m.mangakatanaId === manga.mangakatanaId)
+            );
+            if (!db.mangas) db.mangas = [];
+            if (idx > -1) {
+                db.mangas[idx] = { ...db.mangas[idx], ...manga, id: db.mangas[idx].id };
+            } else {
+                db.mangas.unshift(manga);
+            }
+            await writeDB(db);
+            return res.status(200).json(manga);
+        }
+
+        // DELETE /manga/:id
+        if (req.method === 'DELETE' && path.startsWith('/manga/')) {
+            const id = path.replace('/manga/', '');
+            db.mangas = (db.mangas || []).filter(m => m.id !== id);
+            db.chapters = (db.chapters || []).filter(c => c.mangaId !== id);
+            await writeDB(db);
+            return res.status(200).json({ success: true });
+        }
+
+        // GET /manga/:mangaId/chapters
+        if (req.method === 'GET' && path.match(/^\/manga\/[^\/]+\/chapters$/)) {
+            const mangaId = path.split('/')[2];
+            const chapters = (db.chapters || []).filter(c => c.mangaId === mangaId);
+            return res.status(200).json(chapters);
+        }
+
+        // GET /chapters/:id
+        if (req.method === 'GET' && path.startsWith('/chapters/')) {
+            const id = path.replace('/chapters/', '');
+            const chapter = (db.chapters || []).find(c => c.id === id);
+            if (!chapter) return res.status(404).json({ error: 'Chapter not found' });
+            return res.status(200).json(chapter);
+        }
+
+        // POST /chapters (Save Chapter)
+        if (req.method === 'POST' && path === '/chapters') {
+            const chapter = await parseBody(req);
+            if (!chapter || !chapter.id) {
+                return res.status(400).json({ error: 'Invalid chapter data' });
+            }
+            if (!db.chapters) db.chapters = [];
+            const idx = db.chapters.findIndex(c => c.id === chapter.id);
+            if (idx > -1) {
+                db.chapters[idx] = chapter;
+            } else {
+                db.chapters.push(chapter);
+            }
+            await writeDB(db);
+            return res.status(200).json(chapter);
+        }
+
+        // POST /chapters/bulk
+        if (req.method === 'POST' && path === '/chapters/bulk') {
+            const body = await parseBody(req);
+            const chapters = body.chapters;
+            if (!Array.isArray(chapters)) {
+                return res.status(400).json({ error: 'Chapters array required' });
+            }
+            if (!db.chapters) db.chapters = [];
+            chapters.forEach(ch => {
+                const idx = db.chapters.findIndex(c => c.id === ch.id);
+                if (idx > -1) db.chapters[idx] = ch;
+                else db.chapters.push(ch);
+            });
+            await writeDB(db);
+            return res.status(200).json({ success: true, count: chapters.length });
+        }
+
+        // Monetization endpoints
+        if (path === '/monetization') {
+            if (req.method === 'GET') {
+                return res.status(200).json(db.monetization || {});
+            }
+            if (req.method === 'POST' || req.method === 'PUT') {
+                const settings = await parseBody(req);
+                db.monetization = settings;
+                await writeDB(db);
+                return res.status(200).json(db.monetization);
+            }
+        }
+
+        // Comments endpoints (/comments/:chapterId)
         if (path.startsWith('/comments/')) {
             const parts = path.replace(/^\/comments\//, '').split('/');
             const chapterId = decodeURIComponent(parts[0] || '');
             const commentId = parts[1] ? decodeURIComponent(parts[1]) : null;
-            global.__vaniscansComments = global.__vaniscansComments || {};
+
+            if (!db.comments) db.comments = {};
 
             if (req.method === 'GET') {
-                return res.status(200).json(global.__vaniscansComments[chapterId] || []);
+                return res.status(200).json(db.comments[chapterId] || []);
             }
             if (req.method === 'POST') {
                 const body = await parseBody(req);
                 if (!body || !body.text) return res.status(400).json({ error: 'Comment text required' });
-                if (!Array.isArray(global.__vaniscansComments[chapterId])) {
-                    global.__vaniscansComments[chapterId] = [];
+                if (!Array.isArray(db.comments[chapterId])) {
+                    db.comments[chapterId] = [];
                 }
-                global.__vaniscansComments[chapterId].unshift(body);
+                db.comments[chapterId].unshift(body);
+                await writeDB(db);
                 return res.status(200).json(body);
             }
             if (req.method === 'DELETE' && commentId) {
-                if (Array.isArray(global.__vaniscansComments[chapterId])) {
-                    global.__vaniscansComments[chapterId] = global.__vaniscansComments[chapterId].filter(c => c.id !== commentId);
+                if (Array.isArray(db.comments[chapterId])) {
+                    db.comments[chapterId] = db.comments[chapterId].filter(c => c.id !== commentId);
+                    await writeDB(db);
                 }
                 return res.status(200).json({ success: true });
             }

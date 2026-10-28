@@ -16,14 +16,32 @@ const MK_HEADERS = {
     'Referer': 'https://mangakatana.com/'
 };
 
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.replace(/\/$/, '') : '';
+const FIREBASE_SECRET = process.env.FIREBASE_SECRET || '';
+
+function readDB() {
+    // Synchronous local read for traditional server fallback
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+            return JSON.parse(raw);
+        }
+    } catch (err) {}
+    return { mangas: [], chapters: [], comments: {}, monetization: {} };
+}
+
+function writeDB(data) {
+    try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {}
+}
+
 function stripHtmlTags(str) {
     return (str || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/\s+/g, ' ').trim();
 }
 
 function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
     const results = [];
-
-    // Case 1: Redirected directly to single manga page (#single_book)
     if (html.includes('id="single_book"') || html.includes("id='single_book'")) {
         const titleMatch = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
         const coverMatch = html.match(/<div[^>]*class="[^"]*div_cover[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i) ||
@@ -61,7 +79,6 @@ function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
         return results;
     }
 
-    // Case 2: Search results grid (#book_list > .item)
     const itemSplit = html.split(/<div[^>]+class="[^"]*\bitem\b[^"]*"[^>]+data-id="/i);
     for (let i = 1; i < itemSplit.length; i++) {
         const block = itemSplit[i];
@@ -117,13 +134,6 @@ function parseMangaKatanaChaptersHtml(html) {
         seenUrls.add(chUrl);
 
         const rawTitle = stripHtmlTags(match[2]);
-        const lowerTitle = rawTitle.toLowerCase();
-        
-        // Exclude non-chapter rows (e.g. promotional banners, volume covers, author notes, external announcements)
-        if (lowerTitle.includes('volume') && !lowerTitle.includes('chapter') && !lowerTitle.match(/ch\./i)) {
-            // keep only if it explicitly looks like a chapter or numbered release
-        }
-
         const chSlug = chUrl.split('/').filter(Boolean).pop() || '';
         const numFromSlug = chSlug.match(/^c(\d+(\.\d+)?)$/i) || chSlug.match(/c(\d+(\.\d+)?)/i);
         const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/^(\d+(\.\d+)?)/);
@@ -137,18 +147,13 @@ function parseMangaKatanaChaptersHtml(html) {
         });
     }
 
-    // MangaKatana lists newest chapters first (top to bottom).
-    // Reversing gives true chronological order (Chapter 1 first, latest chapter last).
     rawChapters.reverse();
-
-    // Deduplicate chapter numbers to prevent duplicates or mixed chapters from other series
     const finalChapters = [];
     const seenNumbers = new Set();
 
     for (let idx = 0; idx < rawChapters.length; idx++) {
         const ch = rawChapters[idx];
         const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
-        
         if (seenNumbers.has(num)) continue;
         seenNumbers.add(num);
 
@@ -165,7 +170,6 @@ function parseMangaKatanaChaptersHtml(html) {
 }
 
 function parseMangaKatanaPagesHtml(html) {
-    // 1. Primary: Check MangaKatana's standard JS image arrays (`thzq`, `ytaw`, `htnc`)
     const scriptArrayRegex = /(?:var|let|const)\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
     let bestPages = [];
     let match;
@@ -188,7 +192,6 @@ function parseMangaKatanaPagesHtml(html) {
 
     if (bestPages.length > 0) return bestPages;
 
-    // 2. Fallback: Match any `data-src` inside `#imgs` reader container
     const dataSrcRegex = /<div[^>]*id="imgs"[\s\S]*$/i;
     const imgsSection = html.match(dataSrcRegex)?.[0] || html;
     const imgTagRegex = /data-src=["'](https?:\/\/[^"']+)["']/gi;
@@ -200,23 +203,6 @@ function parseMangaKatanaPagesHtml(html) {
         }
     }
     return fallbackUrls;
-}
-
-function readDB() {
-    try {
-        if (!fs.existsSync(DATA_FILE)) {
-            return { mangas: [], chapters: [], comments: {}, monetization: {} };
-        }
-        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-        return JSON.parse(raw);
-    } catch (err) {
-        console.error('Error reading manga.json:', err);
-        return { mangas: [], chapters: [], comments: {}, monetization: {} };
-    }
-}
-
-function writeDB(data) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 exports.verifyAdminLogin = (req, res) => {
@@ -266,14 +252,10 @@ exports.proxyMangaDexImage = async (req, res) => {
             'User-Agent': isKatana ? MK_HEADERS['User-Agent'] : USER_AGENT,
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
         };
-        if (isKatana) {
-            reqHeaders['Referer'] = 'https://mangakatana.com/';
-        }
+        if (isKatana) reqHeaders['Referer'] = 'https://mangakatana.com/';
 
         const imgRes = await fetch(targetUrl, { headers: reqHeaders });
-        if (!imgRes.ok) {
-            return res.status(imgRes.status).send('Upstream image error');
-        }
+        if (!imgRes.ok) return res.status(imgRes.status).send('Upstream image error');
 
         const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
         res.setHeader('Content-Type', contentType);
@@ -332,9 +314,7 @@ exports.getMangaDexFeed = async (req, res) => {
         const params = new URLSearchParams();
         params.append('limit', String(limit));
         params.append('offset', String(offset));
-        if (lang !== 'all') {
-            params.append('translatedLanguage[]', lang);
-        }
+        if (lang !== 'all') params.append('translatedLanguage[]', lang);
         params.append('includes[]', 'scanlation_group');
         params.append('order[chapter]', 'asc');
         params.append('order[volume]', 'asc');
@@ -423,11 +403,12 @@ exports.saveManga = (req, res) => {
         return res.status(400).json({ error: 'Invalid manga payload' });
     }
     const db = readDB();
-    const idx = db.mangas.findIndex(
+    const idx = (db.mangas || []).findIndex(
         m => m.id === manga.id ||
              (manga.mangadexId && m.mangadexId === manga.mangadexId) ||
              (manga.mangakatanaId && m.mangakatanaId === manga.mangakatanaId)
     );
+    if (!db.mangas) db.mangas = [];
     if (idx > -1) {
         db.mangas[idx] = { ...db.mangas[idx], ...manga, id: db.mangas[idx].id };
     } else {
@@ -440,8 +421,8 @@ exports.saveManga = (req, res) => {
 exports.deleteManga = (req, res) => {
     const { id } = req.params;
     const db = readDB();
-    db.mangas = db.mangas.filter(m => m.id !== id);
-    db.chapters = db.chapters.filter(c => c.mangaId !== id);
+    db.mangas = (db.mangas || []).filter(m => m.id !== id);
+    db.chapters = (db.chapters || []).filter(c => c.mangaId !== id);
     writeDB(db);
     res.json({ success: true });
 };
@@ -467,6 +448,7 @@ exports.saveChapter = (req, res) => {
         return res.status(400).json({ error: 'Invalid chapter data' });
     }
     const db = readDB();
+    if (!db.chapters) db.chapters = [];
     const idx = db.chapters.findIndex(c => c.id === chapter.id);
     if (idx > -1) {
         db.chapters[idx] = chapter;
@@ -483,6 +465,7 @@ exports.bulkSaveChapters = (req, res) => {
         return res.status(400).json({ error: 'Chapters array required' });
     }
     const db = readDB();
+    if (!db.chapters) db.chapters = [];
     chapters.forEach(ch => {
         const idx = db.chapters.findIndex(c => c.id === ch.id);
         if (idx > -1) db.chapters[idx] = ch;
