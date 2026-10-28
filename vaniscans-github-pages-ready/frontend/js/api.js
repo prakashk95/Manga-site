@@ -675,7 +675,8 @@ class ApiService {
             }
 
             offset += batch.length;
-            if (batch.length < pageSize || offset >= (feedJson.total || 0) || offset >= 500) break;
+            // Allow paginating up to 5000 feed items so multi-group duplicates never cap your requested chapter count at 95!
+            if (batch.length < pageSize || offset >= (feedJson.total || 0) || offset >= 5000) break;
         }
 
         return collected;
@@ -683,11 +684,12 @@ class ApiService {
 
     async crawlMangaDexChaptersWithImages(mangadexId, targetMangaId, desiredCount, lang = 'en', onProgress = null) {
         const maxChapters = Math.max(1, parseInt(desiredCount, 10) || 1);
-        let candidates = await this.fetchHostedChapterList(mangadexId, maxChapters + 3, lang);
+        // Fetch extra buffer (+25) so if any chapter node fails, we still deliver all 100 requested chapters
+        let candidates = await this.fetchHostedChapterList(mangadexId, maxChapters + 25, lang);
 
         let usedFallbackLang = false;
         if (candidates.length === 0 && lang !== 'all') {
-            candidates = await this.fetchHostedChapterList(mangadexId, maxChapters + 3, 'all');
+            candidates = await this.fetchHostedChapterList(mangadexId, maxChapters + 25, 'all');
             usedFallbackLang = true;
         }
 
@@ -695,6 +697,7 @@ class ApiService {
             throw new Error('This series only has external links (e.g. MangaPlus) and 0 hosted image chapters on MangaDex.');
         }
 
+        const totalGoal = Math.min(maxChapters, candidates.length);
         const finalChapters = [];
         for (let i = 0; i < candidates.length && finalChapters.length < maxChapters; i++) {
             const chObj = candidates[i];
@@ -705,30 +708,36 @@ class ApiService {
             const chTitle = attr.title ? `${chLabel} - ${attr.title}` : chLabel;
 
             if (typeof onProgress === 'function') {
-                onProgress(finalChapters.length + 1, Math.min(maxChapters, candidates.length), chTitle);
+                onProgress(finalChapters.length + 1, totalGoal, chTitle);
             }
 
-            try {
-                const pageData = await this.resolveMangaDexChapterPagesDetailed(chObj.id);
-                if (pageData && pageData.pages.length > 0) {
-                    finalChapters.push({
-                        id: `${targetMangaId}-md-${chObj.id}`,
-                        mangadexChapterId: chObj.id,
-                        mangaId: targetMangaId,
-                        title: chTitle,
-                        number: isNaN(chNum) ? (finalChapters.length + 1) : chNum,
-                        pages: pageData.pages,
-                        pagesSaver: pageData.pagesSaver,
-                        atHomeUpdatedAt: Date.now(),
-                        createdAt: attr.publishAt ? new Date(attr.publishAt).getTime() : (Date.now() - (maxChapters - finalChapters.length) * 60000)
-                    });
+            let pageData = null;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    pageData = await this.resolveMangaDexChapterPagesDetailed(chObj.id);
+                    if (pageData && pageData.pages.length > 0) break;
+                } catch (chErr) {
+                    if (attempt === 1) console.warn(`Skipping chapter ${chObj.id}:`, chErr);
+                    await new Promise(r => setTimeout(r, 300));
                 }
-            } catch (chErr) {
-                console.warn(`Skipping chapter ${chObj.id} due to At-Home node error:`, chErr);
+            }
+
+            if (pageData && pageData.pages.length > 0) {
+                finalChapters.push({
+                    id: `${targetMangaId}-md-${chObj.id}`,
+                    mangadexChapterId: chObj.id,
+                    mangaId: targetMangaId,
+                    title: chTitle,
+                    number: isNaN(chNum) ? (finalChapters.length + 1) : chNum,
+                    pages: pageData.pages,
+                    pagesSaver: pageData.pagesSaver,
+                    atHomeUpdatedAt: Date.now(),
+                    createdAt: attr.publishAt ? new Date(attr.publishAt).getTime() : (Date.now() - (maxChapters - finalChapters.length) * 60000)
+                });
             }
 
             if (finalChapters.length < maxChapters && i < candidates.length - 1) {
-                await new Promise(r => setTimeout(r, 250));
+                await new Promise(r => setTimeout(r, 180));
             }
         }
 
@@ -879,7 +888,7 @@ class ApiService {
     }
 
     parseClientMangaKatanaChapters(html) {
-        const chapters = [];
+        const rawChapters = [];
         const seenUrls = new Set();
         const rowRegex = /<div[^>]*class="[^"]*\bchapter\b[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
         let match;
@@ -890,23 +899,33 @@ class ApiService {
 
             const rawTitle = stripHtmlTagsClient(match[2]);
             const chSlug = chUrl.split('/').filter(Boolean).pop() || '';
-            const numFromSlug = chSlug.match(/c(\d+(\.\d+)?)/i);
-            const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/(\d+(\.\d+)?)/);
-            const chNum = numFromSlug ? parseFloat(numFromSlug[1]) : (numFromTitle ? parseFloat(numFromTitle[1]) : (chapters.length + 1));
+            const numFromSlug = chSlug.match(/^c(\d+(\.\d+)?)$/i) || chSlug.match(/c(\d+(\.\d+)?)/i);
+            const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/^(\d+(\.\d+)?)/);
+            const parsedNum = numFromSlug ? parseFloat(numFromSlug[1]) : (numFromTitle ? parseFloat(numFromTitle[1]) : null);
 
-            chapters.push({
-                id: chSlug || `ch-${chapters.length + 1}`,
+            rawChapters.push({
+                id: chSlug || `ch-${rawChapters.length + 1}`,
                 url: chUrl.startsWith('http') ? chUrl : `https://mangakatana.com${chUrl}`,
-                title: rawTitle || `Chapter ${chNum}`,
-                number: isNaN(chNum) ? (chapters.length + 1) : chNum
+                title: rawTitle,
+                parsedNum
             });
         }
-        chapters.sort((a, b) => (a.number || 0) - (b.number || 0));
-        return chapters;
+        // Reverse MangaKatana's newest-first table so Chapter 1 is first and latest chapter is last
+        rawChapters.reverse();
+        return rawChapters.map((ch, idx) => {
+            const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (idx + 1);
+            return {
+                id: ch.id,
+                url: ch.url,
+                title: ch.title || `Chapter ${num}`,
+                number: num,
+                seqIndex: idx + 1
+            };
+        });
     }
 
     parseClientMangaKatanaPages(html) {
-        const scriptArrayRegex = /var\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
+        const scriptArrayRegex = /(?:var|let|const)\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
         let bestPages = [];
         let match;
         while ((match = scriptArrayRegex.exec(html)) !== null) {
@@ -915,15 +934,27 @@ class ApiService {
             const urls = rawList
                 .split(',')
                 .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
-                .filter(u => /^https?:\/\/.+\.(jpg|jpeg|png|webp|avif|gif)/i.test(u) || u.includes('mangakatana'));
+                .filter(u => /^https?:\/\/.+/i.test(u) && !u.includes('logo') && !u.includes('avatar') && !u.includes('banner'));
             if (urls.length > bestPages.length || varName === 'thzq' || varName === 'ytaw') {
                 if (urls.length > 0) {
                     bestPages = urls;
-                    if (varName === 'thzq' && urls.length > 2) break;
+                    if (varName === 'thzq' && urls.length >= 1) break;
                 }
             }
         }
-        return bestPages;
+        if (bestPages.length > 0) return bestPages;
+
+        const dataSrcRegex = /<div[^>]*id="imgs"[\s\S]*$/i;
+        const imgsSection = html.match(dataSrcRegex)?.[0] || html;
+        const imgTagRegex = /data-src=["'](https?:\/\/[^"']+)["']/gi;
+        const fallbackUrls = [];
+        while ((match = imgTagRegex.exec(imgsSection)) !== null) {
+            const u = match[1].trim();
+            if (!u.includes('logo') && !u.includes('avatar')) {
+                fallbackUrls.push(u);
+            }
+        }
+        return fallbackUrls;
     }
 
     async searchMangaKatanaCatalog(rawQuery = '') {
@@ -989,7 +1020,9 @@ class ApiService {
             throw new Error('No chapters found on MangaKatana for this series.');
         }
 
-        const candidates = allChapters.slice(0, maxChapters + 2);
+        // Allow scanning through all available chapters if a few chapters fail or need retry, so 100 requested = 100 pulled!
+        const candidates = allChapters.slice(0, maxChapters + 30);
+        const totalGoal = Math.min(maxChapters, allChapters.length);
         const finalChapters = [];
 
         for (let i = 0; i < candidates.length && finalChapters.length < maxChapters; i++) {
@@ -997,30 +1030,36 @@ class ApiService {
             const chTitle = chObj.title || `Chapter ${chObj.number || (finalChapters.length + 1)}`;
 
             if (typeof onProgress === 'function') {
-                onProgress(finalChapters.length + 1, Math.min(maxChapters, candidates.length), chTitle);
+                onProgress(finalChapters.length + 1, totalGoal, chTitle);
             }
 
-            try {
-                const pages = await this.resolveMangaKatanaChapterPages(chObj.url);
-                if (pages && pages.length > 0) {
-                    finalChapters.push({
-                        id: `${targetMangaId}-mk-${chObj.id}`,
-                        mangakatanaChapterUrl: chObj.url,
-                        mangaId: targetMangaId,
-                        title: chTitle,
-                        number: typeof chObj.number === 'number' && !isNaN(chObj.number) ? chObj.number : (finalChapters.length + 1),
-                        pages,
-                        pagesSaver: pages,
-                        atHomeUpdatedAt: Date.now(),
-                        createdAt: Date.now() - (maxChapters - finalChapters.length) * 60000
-                    });
+            let pages = [];
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    pages = await this.resolveMangaKatanaChapterPages(chObj.url);
+                    if (pages && pages.length > 0) break;
+                } catch (chErr) {
+                    if (attempt === 2) console.warn(`Skipping MangaKatana chapter ${chObj.url}:`, chErr);
                 }
-            } catch (chErr) {
-                console.warn(`Skipping MangaKatana chapter ${chObj.url}:`, chErr);
+                await new Promise(r => setTimeout(r, 350 * (attempt + 1)));
+            }
+
+            if (pages && pages.length > 0) {
+                finalChapters.push({
+                    id: `${targetMangaId}-mk-${chObj.id}`,
+                    mangakatanaChapterUrl: chObj.url,
+                    mangaId: targetMangaId,
+                    title: chTitle,
+                    number: typeof chObj.number === 'number' && !isNaN(chObj.number) ? chObj.number : (finalChapters.length + 1),
+                    pages,
+                    pagesSaver: pages,
+                    atHomeUpdatedAt: Date.now(),
+                    createdAt: Date.now() - (maxChapters - finalChapters.length) * 60000
+                });
             }
 
             if (finalChapters.length < maxChapters && i < candidates.length - 1) {
-                await new Promise(r => setTimeout(r, 200));
+                await new Promise(r => setTimeout(r, 150));
             }
         }
 

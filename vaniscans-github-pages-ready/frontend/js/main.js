@@ -881,7 +881,7 @@ class App {
                     <div class="pt-2.5 border-t border-[#232741] space-y-2">
                         <div class="flex items-center justify-between gap-2">
                             <label class="text-[11px] font-semibold text-slate-300">Chapters to pull:</label>
-                            <input type="number" id="cardChCount_${idx}" min="1" max="500" value="${defaultCount}"
+                            <input type="number" id="cardChCount_${idx}" min="1" max="5000" value="${defaultCount}"
                                 class="card-chapter-count-input w-24 bg-[#121422] border border-[#2f3558] rounded-lg px-2.5 py-1 text-xs font-bold text-white text-center focus:outline-none focus:border-purple-500">
                         </div>
 

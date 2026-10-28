@@ -103,7 +103,7 @@ function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
 }
 
 function parseMangaKatanaChaptersHtml(html) {
-    const chapters = [];
+    const rawChapters = [];
     const seenUrls = new Set();
     const rowRegex = /<div[^>]*class="[^"]*\bchapter\b[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
     let match;
@@ -115,26 +115,39 @@ function parseMangaKatanaChaptersHtml(html) {
 
         const rawTitle = stripHtmlTags(match[2]);
         const chSlug = chUrl.split('/').filter(Boolean).pop() || '';
-        const numFromSlug = chSlug.match(/c(\d+(\.\d+)?)/i);
-        const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/(\d+(\.\d+)?)/);
-        const chNum = numFromSlug ? parseFloat(numFromSlug[1]) : (numFromTitle ? parseFloat(numFromTitle[1]) : (chapters.length + 1));
+        // Match /c10, /c10.5, /c0.1 or Chapter 10 in title
+        const numFromSlug = chSlug.match(/^c(\d+(\.\d+)?)$/i) || chSlug.match(/c(\d+(\.\d+)?)/i);
+        const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/^(\d+(\.\d+)?)/);
+        const parsedNum = numFromSlug ? parseFloat(numFromSlug[1]) : (numFromTitle ? parseFloat(numFromTitle[1]) : null);
 
-        chapters.push({
-            id: chSlug || `ch-${chapters.length + 1}`,
+        rawChapters.push({
+            id: chSlug || `ch-${rawChapters.length + 1}`,
             url: chUrl.startsWith('http') ? chUrl : `${MANGAKATANA_BASE}${chUrl}`,
-            title: rawTitle || `Chapter ${chNum}`,
-            number: isNaN(chNum) ? (chapters.length + 1) : chNum
+            title: rawTitle,
+            parsedNum
         });
     }
 
-    // MangaKatana lists newest chapters first; sort ascending by chapter number so Chapter 1..N are pulled in order
-    chapters.sort((a, b) => (a.number || 0) - (b.number || 0));
-    return chapters;
+    // MangaKatana table is ALWAYS ordered newest-to-oldest (top to bottom).
+    // Reversing gives exact chronological order (Chapter 1 first, latest chapter last)
+    // and guarantees no bonus chapter gets assigned a fake number like 1196!
+    rawChapters.reverse();
+
+    return rawChapters.map((ch, idx) => {
+        const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (idx + 1);
+        return {
+            id: ch.id,
+            url: ch.url,
+            title: ch.title || `Chapter ${num}`,
+            number: num,
+            seqIndex: idx + 1
+        };
+    });
 }
 
 function parseMangaKatanaPagesHtml(html) {
-    // MangaKatana stores chapter page URLs in a JS array variable like `var thzq=[...]` or `var ytaw=[...]`
-    const scriptArrayRegex = /var\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
+    // 1. Primary: Check MangaKatana's standard JS image arrays (`thzq`, `ytaw`, `htnc`)
+    const scriptArrayRegex = /(?:var|let|const)\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
     let bestPages = [];
     let match;
 
@@ -144,16 +157,30 @@ function parseMangaKatanaPagesHtml(html) {
         const urls = rawList
             .split(',')
             .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
-            .filter(u => /^https?:\/\/.+\.(jpg|jpeg|png|webp|avif|gif)/i.test(u) || u.includes('mangakatana'));
+            .filter(u => /^https?:\/\/.+/i.test(u) && !u.includes('logo') && !u.includes('avatar') && !u.includes('banner'));
 
         if (urls.length > bestPages.length || varName === 'thzq' || varName === 'ytaw') {
             if (urls.length > 0) {
                 bestPages = urls;
-                if (varName === 'thzq' && urls.length > 2) break;
+                if (varName === 'thzq' && urls.length >= 1) break;
             }
         }
     }
-    return bestPages;
+
+    if (bestPages.length > 0) return bestPages;
+
+    // 2. Fallback: Match any `data-src` inside `#imgs` reader container
+    const dataSrcRegex = /<div[^>]*id="imgs"[\s\S]*$/i;
+    const imgsSection = html.match(dataSrcRegex)?.[0] || html;
+    const imgTagRegex = /data-src=["'](https?:\/\/[^"']+)["']/gi;
+    const fallbackUrls = [];
+    while ((match = imgTagRegex.exec(imgsSection)) !== null) {
+        const u = match[1].trim();
+        if (!u.includes('logo') && !u.includes('avatar')) {
+            fallbackUrls.push(u);
+        }
+    }
+    return fallbackUrls;
 }
 
 async function parseBody(req) {
