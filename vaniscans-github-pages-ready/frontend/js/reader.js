@@ -32,14 +32,12 @@ class ReaderController {
         if (updateUrl && this.app.currentManga) {
             const mangaSlug = this.app.getMangaSlug(this.app.currentManga);
             const chSlug = this.app.getChapterSlug(chapter, this.currentChapterIndex + 1);
-            const targetPath = `/comics/${mangaSlug}/chapter/${chSlug}#resume`;
-            if (window.location.pathname !== `/comics/${mangaSlug}/chapter/${chSlug}`) {
-                window.history.pushState(
-                    { view: 'reader', mangaId: this.app.currentManga.id, chapterId: chapter.id },
-                    `${this.app.currentManga.title} - ${chapter.title}`,
-                    targetPath
-                );
-            }
+            const dailyUrl = this.app.buildUrlWithDailyDate(`/comics/${mangaSlug}/chapter/${chSlug}`, '#resume');
+            window.history.pushState(
+                { view: 'reader', mangaId: this.app.currentManga.id, chapterId: chapter.id },
+                `${this.app.currentManga.title} - ${chapter.title}`,
+                dailyUrl
+            );
             document.title = `${this.app.currentManga.title} - ${chapter.title} — VaniScans`;
         }
 
@@ -55,6 +53,7 @@ class ReaderController {
         }
 
         this.renderReaderChapter(chapter);
+        this.app.loadAndRenderChapterComments(chapter.id);
 
         const savedScrollKey = `vaniscans_scroll_${chapter.id}`;
         const savedScroll = sessionStorage.getItem(savedScrollKey);

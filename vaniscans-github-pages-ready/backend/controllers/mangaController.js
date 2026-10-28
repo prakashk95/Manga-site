@@ -189,13 +189,13 @@ function parseMangaKatanaPagesHtml(html) {
 function readDB() {
     try {
         if (!fs.existsSync(DATA_FILE)) {
-            return { mangas: [], chapters: [], monetization: {} };
+            return { mangas: [], chapters: [], comments: {}, monetization: {} };
         }
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         return JSON.parse(raw);
     } catch (err) {
         console.error('Error reading manga.json:', err);
-        return { mangas: [], chapters: [], monetization: {} };
+        return { mangas: [], chapters: [], comments: {}, monetization: {} };
     }
 }
 
@@ -487,4 +487,35 @@ exports.saveMonetization = (req, res) => {
     db.monetization = settings;
     writeDB(db);
     res.json(db.monetization);
+};
+
+exports.getCommentsForChapter = (req, res) => {
+    const { chapterId } = req.params;
+    const db = readDB();
+    const allComments = db.comments || {};
+    res.json(allComments[chapterId] || []);
+};
+
+exports.saveCommentForChapter = (req, res) => {
+    const { chapterId } = req.params;
+    const comment = req.body;
+    if (!comment || !comment.text) {
+        return res.status(400).json({ error: 'Comment text required' });
+    }
+    const db = readDB();
+    if (!db.comments) db.comments = {};
+    if (!Array.isArray(db.comments[chapterId])) db.comments[chapterId] = [];
+    db.comments[chapterId].unshift(comment);
+    writeDB(db);
+    res.json(comment);
+};
+
+exports.deleteCommentForChapter = (req, res) => {
+    const { chapterId, commentId } = req.params;
+    const db = readDB();
+    if (db.comments && Array.isArray(db.comments[chapterId])) {
+        db.comments[chapterId] = db.comments[chapterId].filter(c => c.id !== commentId);
+        writeDB(db);
+    }
+    res.json({ success: true });
 };

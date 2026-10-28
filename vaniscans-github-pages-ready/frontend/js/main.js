@@ -67,6 +67,43 @@ class App {
         this.renderGridToken = 0;
     }
 
+    /**
+     * Returns today's date in YYYY-MM-DD format according to the user's current local date
+     */
+    getDailyDateParam() {
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    /**
+     * Appends the daily changing date parameter (?date=YYYY-MM-DD) to any path
+     * while preserving hashes (#adminpanel, #resume) so admin access is never affected.
+     */
+    buildUrlWithDailyDate(pathname = '/', hash = '') {
+        const cleanPath = pathname || '/';
+        const today = this.getDailyDateParam();
+        const cleanHash = hash ? (hash.startsWith('#') ? hash : `#${hash}`) : '';
+        return `${cleanPath}?date=${today}${cleanHash}`;
+    }
+
+    /**
+     * Ensures the current browser URL always carries today's ?date=YYYY-MM-DD parameter
+     * without breaking /adminpanel or #adminpanel routes.
+     */
+    syncDailyDateInCurrentUrl() {
+        try {
+            const url = new URL(window.location.href);
+            const today = this.getDailyDateParam();
+            if (url.searchParams.get('date') !== today) {
+                url.searchParams.set('date', today);
+                window.history.replaceState(window.history.state, document.title, url.pathname + url.search + url.hash);
+            }
+        } catch (_) {}
+    }
+
     getMangaSlug(manga) {
         if (!manga) return 'series';
         const base = (manga.title || 'series')
@@ -158,11 +195,15 @@ class App {
             window.location.pathname + window.location.search + window.location.hash
         );
 
-        // 1. Admin Panel Route (/adminpanel or #adminpanel)
+        this.syncDailyDateInCurrentUrl();
+
+        // 1. Admin Panel Route (/adminpanel, #adminpanel, or ?adminpanel — works seamlessly with ?date=YYYY-MM-DD)
+        const CleanLowerPath = lowerPath.replace(/\/+$/, '');
         if (
             hash.includes('adminpanel') ||
-            lowerPath.endsWith('/adminpanel') ||
-            fullHref.includes('#adminpanel')
+            CleanLowerPath.endsWith('/adminpanel') ||
+            fullHref.includes('#adminpanel') ||
+            window.location.search.toLowerCase().includes('adminpanel')
         ) {
             this.showAdminPanelRoute();
             return;
@@ -249,8 +290,13 @@ class App {
     }
 
     showHomeView(pushUrl = true) {
-        if (pushUrl && (window.location.pathname !== '/' || window.location.hash)) {
-            window.history.pushState({ view: 'home' }, 'VaniScans — Read Manhwa, Manga & Webtoons', '/');
+        if (pushUrl) {
+            const targetUrl = this.buildUrlWithDailyDate('/', '');
+            if (window.location.pathname + window.location.search !== targetUrl || window.location.hash) {
+                window.history.pushState({ view: 'home' }, 'VaniScans — Read Manhwa, Manga & Webtoons', targetUrl);
+            }
+        } else {
+            this.syncDailyDateInCurrentUrl();
         }
         document.title = 'VaniScans — Read Manhwa, Manga & Webtoons';
         document.getElementById('catalogSectionTitle').textContent = 'LATEST CHAPTER RELEASES';
@@ -261,6 +307,152 @@ class App {
         this.renderMangaGrid();
         this.renderPopularSidebar();
         if (window.lucide) lucide.createIcons();
+    }
+
+
+    decodeHtmlEntities(str) {
+        if (!str) return '';
+        const txt = document.createElement('textarea');
+        txt.innerHTML = str;
+        return txt.value;
+    }
+
+    getSortedChaptersAscending() {
+        if (!this.currentChapters || this.currentChapters.length === 0) return [];
+        return [...this.currentChapters].sort((a, b) => {
+            const numA = typeof a.number === 'number' ? a.number : parseFloat((a.title || '').replace(/[^\d.-]/g, '')) || 0;
+            const numB = typeof b.number === 'number' ? b.number : parseFloat((b.title || '').replace(/[^\d.-]/g, '')) || 0;
+            return numA - numB;
+        });
+    }
+
+    readFirstChapter() {
+        const asc = this.getSortedChaptersAscending();
+        if (asc.length === 0) {
+            this.showToast('No chapters available for this series yet.', 'info');
+            return;
+        }
+        this.openReader(asc[0].id);
+    }
+
+    readLatestChapter() {
+        const asc = this.getSortedChaptersAscending();
+        if (asc.length === 0) {
+            this.showToast('No chapters available for this series yet.', 'info');
+            return;
+        }
+        this.openReader(asc[asc.length - 1].id);
+    }
+
+    openFirstChapterInReader() {
+        this.readFirstChapter();
+    }
+
+    // =========================================================================
+    // CHAPTER COMMENTS & READER CHAT
+    // =========================================================================
+
+    async loadAndRenderChapterComments(chapterId) {
+        if (!chapterId) return;
+        const savedAuthor = localStorage.getItem('vaniscans_reader_nickname') || '';
+        const authorInput = document.getElementById('commentAuthorInput');
+        if (authorInput && !authorInput.value && savedAuthor) {
+            authorInput.value = savedAuthor;
+        }
+
+        const comments = await this.api.getCommentsForChapter(chapterId);
+        this.renderChapterCommentsList(chapterId, comments);
+    }
+
+    renderChapterCommentsList(chapterId, comments = []) {
+        const listEl = document.getElementById('chapterCommentsList');
+        const badgeEl = document.getElementById('chapterCommentsCountBadge');
+        if (!listEl) return;
+
+        if (badgeEl) badgeEl.textContent = String(comments.length);
+
+        if (comments.length === 0) {
+            listEl.innerHTML = `
+                <div class="py-10 text-center bg-[#16192a] rounded-2xl border border-dashed border-[#242842] space-y-2">
+                    <i data-lucide="message-circle" class="w-8 h-8 text-slate-500 mx-auto"></i>
+                    <p class="text-xs font-semibold text-slate-300">No comments on this chapter yet</p>
+                    <p class="text-[11px] text-slate-500">Be the first reader to start the discussion!</p>
+                </div>
+            `;
+            if (window.lucide) lucide.createIcons();
+            return;
+        }
+
+        const isAdmin = sessionStorage.getItem('vaniscans_admin_auth') === 'true';
+        const myCommentIds = JSON.parse(localStorage.getItem('vaniscans_my_comment_ids') || '[]');
+
+        listEl.innerHTML = comments
+            .map(c => {
+                const initial = (c.author || 'R').trim().charAt(0).toUpperCase();
+                const canDelete = isAdmin || myCommentIds.includes(c.id);
+                const safeAuthor = (c.author || 'Reader').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const safeText = (c.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return `
+                <div class="p-4 rounded-2xl bg-[#16192a] border border-[#22263e] flex items-start gap-3.5 transition hover:border-purple-500/30">
+                    <div class="w-9 h-9 rounded-xl font-black text-xs text-white flex items-center justify-center shrink-0 shadow" style="background:${c.avatarColor || '#8b5cf6'}">
+                        ${initial}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs font-bold text-white">${safeAuthor}</span>
+                                <span class="text-[10px] text-slate-500">${this.getRelativeTime(c.createdAt)}</span>
+                            </div>
+                            ${
+                                canDelete
+                                    ? `<button type="button" onclick="app.handleDeleteChapterComment('${chapterId}', '${c.id}')" class="text-[11px] text-rose-400 hover:text-rose-300 p-1 rounded-lg hover:bg-rose-500/10 transition" title="Delete comment">
+                                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                       </button>`
+                                    : ''
+                            }
+                        </div>
+                        <p class="text-xs text-slate-300 mt-1.5 leading-relaxed break-words">${safeText}</p>
+                    </div>
+                </div>
+            `;
+            })
+            .join('');
+        if (window.lucide) lucide.createIcons();
+    }
+
+    async handlePostChapterComment(e) {
+        e.preventDefault();
+        const ch = this.reader?.currentChapterObj;
+        if (!ch) return;
+
+        const authorEl = document.getElementById('commentAuthorInput');
+        const textEl = document.getElementById('commentTextInput');
+        const author = (authorEl?.value || '').trim() || 'Anonymous Reader';
+        const text = (textEl?.value || '').trim();
+        if (!text) return;
+
+        localStorage.setItem('vaniscans_reader_nickname', author);
+        const palette = ['#8b5cf6', '#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'];
+        const color = palette[Math.abs(author.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0)) % palette.length];
+
+        try {
+            const created = await this.api.addCommentForChapter(ch.id, author, text, color);
+            const myCommentIds = JSON.parse(localStorage.getItem('vaniscans_my_comment_ids') || '[]');
+            myCommentIds.push(created.id);
+            localStorage.setItem('vaniscans_my_comment_ids', JSON.stringify(myCommentIds));
+
+            if (textEl) textEl.value = '';
+            await this.loadAndRenderChapterComments(ch.id);
+            this.showToast('Comment posted!', 'success');
+        } catch (err) {
+            this.showToast(err.message || 'Could not post comment', 'error');
+        }
+    }
+
+    async handleDeleteChapterComment(chapterId, commentId) {
+        await this.api.deleteCommentForChapter(chapterId, commentId);
+        await this.loadAndRenderChapterComments(chapterId);
+        this.showToast('Comment deleted', 'info');
     }
 
     openReader(chapterId) { return this.reader.openReader(chapterId, true); }
@@ -361,10 +553,12 @@ class App {
 
         if (updateUrl) {
             const slug = this.getMangaSlug(manga);
-            const targetPath = `/comics/${slug}`;
-            if (window.location.pathname !== targetPath) {
-                window.history.pushState({ view: 'detail', mangaId: manga.id }, `${manga.title} — VaniScans`, targetPath);
+            const targetUrl = this.buildUrlWithDailyDate(`/comics/${slug}`, '');
+            if (window.location.pathname + window.location.search !== targetUrl) {
+                window.history.pushState({ view: 'detail', mangaId: manga.id }, `${manga.title} — VaniScans`, targetUrl);
             }
+        } else {
+            this.syncDailyDateInCurrentUrl();
         }
         document.title = `${manga.title} — VaniScans`;
 
@@ -378,7 +572,12 @@ class App {
         document.getElementById('detailStatus').textContent = manga.status || 'Ongoing';
         document.getElementById('detailRating').innerHTML = `<i data-lucide="star" class="w-3.5 h-3.5 fill-current"></i> ${manga.rating || '9.8'}`;
         document.getElementById('detailTotalChapters').textContent = this.currentChapters.length;
-        document.getElementById('detailSynopsis').textContent = manga.synopsis || 'No synopsis provided.';
+        document.getElementById('detailSynopsis').textContent = this.decodeHtmlEntities(manga.synopsis || 'No synopsis provided.');
+
+        const firstBtn = document.getElementById('firstChapterBtn');
+        const latestBtn = document.getElementById('latestChapterBtn');
+        if (firstBtn) firstBtn.disabled = this.currentChapters.length === 0;
+        if (latestBtn) latestBtn.disabled = this.currentChapters.length === 0;
 
         const genresContainer = document.getElementById('detailGenres');
         genresContainer.innerHTML = (manga.genres || ['Action'])

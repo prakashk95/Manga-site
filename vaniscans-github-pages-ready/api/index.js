@@ -381,6 +381,33 @@ module.exports = async (req, res) => {
             return res.status(200).json({ result: 'ok', pages });
         }
 
+        // 9. Chapter Comments (/api/comments/:chapterId)
+        if (path.startsWith('/comments/')) {
+            const parts = path.replace(/^\/comments\//, '').split('/');
+            const chapterId = decodeURIComponent(parts[0] || '');
+            const commentId = parts[1] ? decodeURIComponent(parts[1]) : null;
+            global.__vaniscansComments = global.__vaniscansComments || {};
+
+            if (req.method === 'GET') {
+                return res.status(200).json(global.__vaniscansComments[chapterId] || []);
+            }
+            if (req.method === 'POST') {
+                const body = await parseBody(req);
+                if (!body || !body.text) return res.status(400).json({ error: 'Comment text required' });
+                if (!Array.isArray(global.__vaniscansComments[chapterId])) {
+                    global.__vaniscansComments[chapterId] = [];
+                }
+                global.__vaniscansComments[chapterId].unshift(body);
+                return res.status(200).json(body);
+            }
+            if (req.method === 'DELETE' && commentId) {
+                if (Array.isArray(global.__vaniscansComments[chapterId])) {
+                    global.__vaniscansComments[chapterId] = global.__vaniscansComments[chapterId].filter(c => c.id !== commentId);
+                }
+                return res.status(200).json({ success: true });
+            }
+        }
+
         return res.status(404).json({ error: 'Endpoint not found' });
     } catch (err) {
         return res.status(500).json({ error: err.message });

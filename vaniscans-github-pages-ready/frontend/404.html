@@ -210,7 +210,17 @@
                 <div class="flex flex-col lg:flex-row gap-8 items-start">
                     <div class="w-full lg:w-72 shrink-0 bg-[#121422] border border-[#20243b] rounded-2xl p-5 shadow-2xl">
                         <img id="detailCover" src="" alt="Cover" referrerpolicy="no-referrer" class="w-full aspect-[3/4] object-cover rounded-xl shadow-lg border border-white/5 mb-4">
-                        <div class="space-y-3">
+                        <div class="space-y-2.5">
+                            <div class="grid grid-cols-2 gap-2">
+                                <button id="firstChapterBtn" onclick="app.readFirstChapter()" class="py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white shadow-lg shadow-purple-600/30 flex items-center justify-center gap-1.5 transition">
+                                    <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+                                    <span>First Ch</span>
+                                </button>
+                                <button id="latestChapterBtn" onclick="app.readLatestChapter()" class="py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider bg-[#181b2e] hover:bg-purple-600/30 text-purple-300 hover:text-white border border-purple-500/30 flex items-center justify-center gap-1.5 transition">
+                                    <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+                                    <span>Latest Ch</span>
+                                </button>
+                            </div>
                             <button id="bookmarkToggleBtn" onclick="app.toggleBookmarkDetail()" class="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition">
                                 <i data-lucide="bookmark" class="w-4 h-4"></i>
                                 <span id="bookmarkBtnText">Bookmark</span>
@@ -312,13 +322,60 @@
                 <button onclick="app.changeSinglePage(1)" class="px-3 py-1 bg-purple-600/40 hover:bg-purple-600 text-white rounded-lg text-xs font-bold transition">Next Page</button>
             </div>
 
-            <div class="max-w-2xl mx-auto w-full py-12 px-4 flex flex-col items-center gap-4 text-center">
+            <div class="max-w-2xl mx-auto w-full pt-12 pb-6 px-4 flex flex-col items-center gap-4 text-center">
                 <div class="text-xs font-medium text-slate-400">Finished Reading this chapter?</div>
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center justify-center gap-3">
+                    <button onclick="app.openFirstChapterInReader()" class="px-4 py-2 bg-[#16182a] hover:bg-purple-600/30 rounded-xl text-xs font-bold text-purple-300 border border-purple-500/30 transition flex items-center gap-1.5">
+                        <i data-lucide="skip-back" class="w-3.5 h-3.5"></i> First Chapter
+                    </button>
                     <button onclick="app.navigateChapter(-1)" class="px-4 py-2 bg-[#16182a] hover:bg-purple-600 rounded-xl text-xs font-bold text-white border border-[#242842] transition">Previous Chapter</button>
                     <button onclick="app.navigateChapter(1)" class="px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-purple-600/30 transition">Next Chapter</button>
                 </div>
             </div>
+
+            <!-- ================= CHAPTER COMMENTS / CHAT SECTION ================= -->
+            <section id="chapterCommentsSection" class="max-w-3xl mx-auto w-full px-4 pb-20 pt-4 select-text">
+                <div class="bg-[#121422] border border-[#20243b] rounded-3xl p-5 sm:p-8 shadow-2xl space-y-6">
+                    <div class="flex items-center justify-between border-b border-[#1f2337] pb-4">
+                        <div class="flex items-center gap-2.5">
+                            <div class="w-9 h-9 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center">
+                                <i data-lucide="message-square" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-black text-white tracking-wide flex items-center gap-2">
+                                    CHAPTER DISCUSSION & CHAT
+                                    <span id="chapterCommentsCountBadge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-purple-600/20 text-purple-300 border border-purple-500/30">0</span>
+                                </h3>
+                                <p class="text-[11px] text-slate-400">Share your thoughts or chat with other readers about this chapter.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Post Comment Form -->
+                    <form id="chapterCommentForm" onsubmit="app.handlePostChapterComment(event)" class="space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div class="sm:col-span-1">
+                                <label class="block text-[11px] font-semibold text-slate-400 mb-1">Your Display Name</label>
+                                <input type="text" id="commentAuthorInput" maxlength="32" placeholder="e.g. ShadowMonarch"
+                                    class="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500">
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block text-[11px] font-semibold text-slate-400 mb-1">Your Message / Comment *</label>
+                                <div class="flex gap-2">
+                                    <input type="text" id="commentTextInput" required maxlength="600" placeholder="Write a comment about this chapter..."
+                                        class="flex-1 bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500">
+                                    <button type="submit" class="px-5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-purple-600/30 transition shrink-0 flex items-center gap-1.5">
+                                        <i data-lucide="send" class="w-3.5 h-3.5"></i> Post
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Comments Feed -->
+                    <div id="chapterCommentsList" class="space-y-3 max-h-[520px] overflow-y-auto pr-1"></div>
+                </div>
+            </section>
         </div>
 
         <!-- ================= SECURE ADMIN PANEL VIEW (#adminpanel) ================= -->

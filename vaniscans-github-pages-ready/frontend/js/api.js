@@ -778,7 +778,7 @@ class ApiService {
     async resolveMangaDexChapterPages(mangadexChapterId, preferDataSaver = true) {
         const detailed = await this.resolveMangaDexChapterPagesDetailed(mangadexChapterId);
         return preferDataSaver ? detailed.pages : detailed.pagesSaver;
-    }
+    
 
     // =========================================================================
     // 2. MANGAKATANA.COM LIVE CRAWLER (Search, Chapter List & Page Resolver)
@@ -1069,6 +1069,105 @@ class ApiService {
 
         return finalChapters;
     }
+}
+
+
+    // =========================================================================
+    // CHAPTER COMMENTS / CHAT PERSISTENCE (LocalStorage + Backend Sync)
+    // =========================================================================
+
+    getLocalCommentsMap() {
+        try {
+            return JSON.parse(localStorage.getItem('vaniscans_chapter_comments_v1') || '{}');
+        } catch (_) {
+            return {};
+        }
+    }
+
+    saveLocalCommentsMap(map) {
+        try {
+            localStorage.setItem('vaniscans_chapter_comments_v1', JSON.stringify(map));
+        } catch (_) {}
+    }
+
+    async getCommentsForChapter(chapterId) {
+        if (!chapterId) return [];
+        const localMap = this.getLocalCommentsMap();
+        const localList = Array.isArray(localMap[chapterId]) ? localMap[chapterId] : [];
+
+        let remoteList = [];
+        try {
+            const res = await fetch(`${API_BASE}/comments/${encodeURIComponent(chapterId)}`, {
+                signal: AbortSignal.timeout(2500)
+            });
+            if (res.ok) {
+                const ct = res.headers.get('content-type') || '';
+                if (ct.includes('application/json')) {
+                    remoteList = await res.json();
+                }
+            }
+        } catch (_) {}
+
+        const combined = [...remoteList, ...localList];
+        const seen = new Set();
+        const deduped = [];
+        for (const c of combined) {
+            if (!c || !c.id || !c.text) continue;
+            if (seen.has(c.id)) continue;
+            seen.add(c.id);
+            deduped.push(c);
+        }
+        deduped.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+        localMap[chapterId] = deduped;
+        this.saveLocalCommentsMap(localMap);
+        return deduped;
+    }
+
+    async addCommentForChapter(chapterId, authorName, text, avatarColor = '#8b5cf6') {
+        const cleanText = (text || '').trim();
+        if (!chapterId || !cleanText) throw new Error('Comment cannot be empty');
+
+        const newComment = {
+            id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            chapterId,
+            author: (authorName || 'Reader').trim() || 'Anonymous Reader',
+            avatarColor,
+            text: cleanText,
+            likes: 0,
+            createdAt: Date.now()
+        };
+
+        const localMap = this.getLocalCommentsMap();
+        if (!Array.isArray(localMap[chapterId])) localMap[chapterId] = [];
+        localMap[chapterId].unshift(newComment);
+        this.saveLocalCommentsMap(localMap);
+
+        try {
+            await fetch(`${API_BASE}/comments/${encodeURIComponent(chapterId)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newComment)
+            });
+        } catch (_) {}
+
+        return newComment;
+    }
+
+    async deleteCommentForChapter(chapterId, commentId) {
+        const localMap = this.getLocalCommentsMap();
+        if (Array.isArray(localMap[chapterId])) {
+            localMap[chapterId] = localMap[chapterId].filter(c => c.id !== commentId);
+            this.saveLocalCommentsMap(localMap);
+        }
+        try {
+            await fetch(`${API_BASE}/comments/${encodeURIComponent(chapterId)}/${encodeURIComponent(commentId)}`, {
+                method: 'DELETE'
+            });
+        } catch (_) {}
+        return true;
+    }
+
 }
 
 window.apiService = new ApiService();

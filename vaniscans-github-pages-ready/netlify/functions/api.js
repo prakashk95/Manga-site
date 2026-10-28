@@ -408,6 +408,47 @@ exports.handler = async (event) => {
             };
         }
 
+        // 9. Chapter Comments (/api/comments/:chapterId)
+        if (path.startsWith('/comments/')) {
+            const parts = path.replace(/^\/comments\//, '').split('/');
+            const chapterId = decodeURIComponent(parts[0] || '');
+            const commentId = parts[1] ? decodeURIComponent(parts[1]) : null;
+            global.__vaniscansComments = global.__vaniscansComments || {};
+
+            if (event.httpMethod === 'GET') {
+                return {
+                    statusCode: 200,
+                    headers: { ...headers, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(global.__vaniscansComments[chapterId] || [])
+                };
+            }
+            if (event.httpMethod === 'POST') {
+                const body = JSON.parse(event.body || '{}');
+                if (!body || !body.text) {
+                    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Comment text required' }) };
+                }
+                if (!Array.isArray(global.__vaniscansComments[chapterId])) {
+                    global.__vaniscansComments[chapterId] = [];
+                }
+                global.__vaniscansComments[chapterId].unshift(body);
+                return {
+                    statusCode: 200,
+                    headers: { ...headers, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                };
+            }
+            if (event.httpMethod === 'DELETE' && commentId) {
+                if (Array.isArray(global.__vaniscansComments[chapterId])) {
+                    global.__vaniscansComments[chapterId] = global.__vaniscansComments[chapterId].filter(c => c.id !== commentId);
+                }
+                return {
+                    statusCode: 200,
+                    headers: { ...headers, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ success: true })
+                };
+            }
+        }
+
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Endpoint not found' }) };
     } catch (err) {
         return {

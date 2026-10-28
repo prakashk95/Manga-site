@@ -32,4 +32,10 @@ router.post('/chapters/bulk', mangaController.bulkSaveChapters);
 router.get('/monetization', mangaController.getMonetization);
 router.post('/monetization', mangaController.saveMonetization);
 
+
+// Chapter Comments / Chat Routes
+router.get('/comments/:chapterId', mangaController.getCommentsForChapter);
+router.post('/comments/:chapterId', mangaController.saveCommentForChapter);
+router.delete('/comments/:chapterId/:commentId', mangaController.deleteCommentForChapter);
+
 module.exports = router;
