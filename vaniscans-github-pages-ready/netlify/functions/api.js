@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const ADMIN_USER_HASH = '059a50ce956b7ec61527c7ecc0c55b5a009dc54ab4acddce8852b46baa2aba30';
 const ADMIN_PASS_HASH = '9109551a88284a2754a704d50d6636fc596ae718df126354742f1637940bbc5a';
@@ -13,14 +15,54 @@ const MK_HEADERS = {
     'Referer': 'https://mangakatana.com/'
 };
 
+const LOCAL_DB_PATH = path.join(__dirname, '../../backend/data/manga.json');
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.replace(/\/$/, '') : '';
+const FIREBASE_SECRET = process.env.FIREBASE_SECRET || '';
+
+async function readDB() {
+    if (FIREBASE_DB_URL) {
+        try {
+            const authParam = FIREBASE_SECRET ? `?auth=${FIREBASE_SECRET}` : '';
+            const res = await fetch(`${FIREBASE_DB_URL}/db.json${authParam}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data) return data;
+            }
+        } catch (e) {}
+    }
+    try {
+        if (fs.existsSync(LOCAL_DB_PATH)) {
+            const raw = fs.readFileSync(LOCAL_DB_PATH, 'utf-8');
+            return JSON.parse(raw);
+        }
+    } catch (e) {}
+    return { mangas: [], chapters: [], comments: {}, monetization: {} };
+}
+
+async function writeDB(dbData) {
+    if (FIREBASE_DB_URL) {
+        try {
+            const authParam = FIREBASE_SECRET ? `?auth=${FIREBASE_SECRET}` : '';
+            const res = await fetch(`${FIREBASE_DB_URL}/db.json${authParam}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(dbData)
+            });
+            if (res.ok) return true;
+        } catch (e) {}
+    }
+    try {
+        fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(dbData, null, 2), 'utf-8');
+    } catch (e) {}
+    return true;
+}
+
 function stripHtmlTags(str) {
     return (str || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/\s+/g, ' ').trim();
 }
 
 function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
     const results = [];
-
-    // Case 1: Redirected directly to single manga page (#single_book)
     if (html.includes('id="single_book"') || html.includes("id='single_book'")) {
         const titleMatch = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
         const coverMatch = html.match(/<div[^>]*class="[^"]*div_cover[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i) ||
@@ -58,7 +100,6 @@ function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
         return results;
     }
 
-    // Case 2: Search results grid (#book_list > .item)
     const itemSplit = html.split(/<div[^>]+class="[^"]*\bitem\b[^"]*"[^>]+data-id="/i);
     for (let i = 1; i < itemSplit.length; i++) {
         const block = itemSplit[i];
@@ -114,13 +155,6 @@ function parseMangaKatanaChaptersHtml(html) {
         seenUrls.add(chUrl);
 
         const rawTitle = stripHtmlTags(match[2]);
-        const lowerTitle = rawTitle.toLowerCase();
-        
-        // Exclude non-chapter rows (e.g. promotional banners, volume covers, author notes, external announcements)
-        if (lowerTitle.includes('volume') && !lowerTitle.includes('chapter') && !lowerTitle.match(/ch\./i)) {
-            // keep only if it explicitly looks like a chapter or numbered release
-        }
-
         const chSlug = chUrl.split('/').filter(Boolean).pop() || '';
         const numFromSlug = chSlug.match(/^c(\d+(\.\d+)?)$/i) || chSlug.match(/c(\d+(\.\d+)?)/i);
         const numFromTitle = rawTitle.match(/chapter\s*(\d+(\.\d+)?)/i) || rawTitle.match(/^(\d+(\.\d+)?)/);
@@ -134,18 +168,13 @@ function parseMangaKatanaChaptersHtml(html) {
         });
     }
 
-    // MangaKatana lists newest chapters first (top to bottom).
-    // Reversing gives true chronological order (Chapter 1 first, latest chapter last).
     rawChapters.reverse();
-
-    // Deduplicate chapter numbers to prevent duplicates or mixed chapters from other series
     const finalChapters = [];
     const seenNumbers = new Set();
 
     for (let idx = 0; idx < rawChapters.length; idx++) {
         const ch = rawChapters[idx];
         const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
-        
         if (seenNumbers.has(num)) continue;
         seenNumbers.add(num);
 
@@ -162,7 +191,6 @@ function parseMangaKatanaChaptersHtml(html) {
 }
 
 function parseMangaKatanaPagesHtml(html) {
-    // 1. Primary: Check MangaKatana's standard JS image arrays (`thzq`, `ytaw`, `htnc`)
     const scriptArrayRegex = /(?:var|let|const)\s+([a-zA-Z0-9_]+)\s*=\s*\[\s*(['"]https?:\/\/[\s\S]*?)\s*\];/g;
     let bestPages = [];
     let match;
@@ -185,7 +213,6 @@ function parseMangaKatanaPagesHtml(html) {
 
     if (bestPages.length > 0) return bestPages;
 
-    // 2. Fallback: Match any `data-src` inside `#imgs` reader container
     const dataSrcRegex = /<div[^>]*id="imgs"[\s\S]*$/i;
     const imgsSection = html.match(dataSrcRegex)?.[0] || html;
     const imgTagRegex = /data-src=["'](https?:\/\/[^"']+)["']/gi;
@@ -214,7 +241,6 @@ exports.handler = async (event) => {
     const qs = event.queryStringParameters || {};
 
     try {
-        // 1. Admin SHA-256 Auth Verification
         if (event.httpMethod === 'POST' && path === '/auth/login') {
             const { userHash, passHash } = JSON.parse(event.body || '{}');
             if (!userHash || !passHash || userHash.length !== 64 || passHash.length !== 64) {
@@ -238,7 +264,6 @@ exports.handler = async (event) => {
             return { statusCode: 401, headers, body: JSON.stringify({ success: false }) };
         }
 
-        // 2. Binary Image Proxy for MangaDex & MangaKatana
         if (event.httpMethod === 'GET' && (path === '/mangadex/img' || path === '/mangakatana/img')) {
             let targetUrl = qs.url || '';
             if (qs.chapterId && qs.pageIndex !== undefined) {
@@ -266,14 +291,10 @@ exports.handler = async (event) => {
                 'User-Agent': isKatana ? MK_HEADERS['User-Agent'] : USER_AGENT,
                 'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
             };
-            if (isKatana) {
-                reqHeaders['Referer'] = 'https://mangakatana.com/';
-            }
+            if (isKatana) reqHeaders['Referer'] = 'https://mangakatana.com/';
 
             const imgRes = await fetch(targetUrl, { headers: reqHeaders });
-            if (!imgRes.ok) {
-                return { statusCode: imgRes.status, headers, body: 'Upstream image error' };
-            }
+            if (!imgRes.ok) return { statusCode: imgRes.status, headers, body: 'Upstream image error' };
 
             const arrayBuffer = await imgRes.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
@@ -281,17 +302,12 @@ exports.handler = async (event) => {
 
             return {
                 statusCode: 200,
-                headers: {
-                    ...headers,
-                    'Content-Type': contentType,
-                    'Cache-Control': 'public, max-age=86400'
-                },
+                headers: { ...headers, 'Content-Type': contentType, 'Cache-Control': 'public, max-age=86400' },
                 body: buffer.toString('base64'),
                 isBase64Encoded: true
             };
         }
 
-        // 3. MangaDex Search Crawler
         if (event.httpMethod === 'GET' && path === '/mangadex/search') {
             const query = (qs.q || '').trim();
             const limit = Math.min(parseInt(qs.limit || '24', 10), 50);
@@ -322,14 +338,9 @@ exports.handler = async (event) => {
 
             const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
             const data = await res.json();
-            return {
-                statusCode: res.status,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            };
+            return { statusCode: res.status, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
         }
 
-        // 4. MangaDex Chapters Feed Crawler
         if (event.httpMethod === 'GET' && path === '/mangadex/feed') {
             const mangaId = qs.mangaId;
             const limit = Math.min(parseInt(qs.limit || '100', 10), 500);
@@ -339,9 +350,7 @@ exports.handler = async (event) => {
             const params = new URLSearchParams();
             params.append('limit', String(limit));
             params.append('offset', String(offset));
-            if (lang !== 'all') {
-                params.append('translatedLanguage[]', lang);
-            }
+            if (lang !== 'all') params.append('translatedLanguage[]', lang);
             params.append('includes[]', 'scanlation_group');
             params.append('order[chapter]', 'asc');
             params.append('order[volume]', 'asc');
@@ -355,27 +364,17 @@ exports.handler = async (event) => {
             const url = `${MANGADEX_API}/manga/${encodeURIComponent(mangaId)}/feed?${params.toString()}`;
             const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
             const data = await res.json();
-            return {
-                statusCode: res.status,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            };
+            return { statusCode: res.status, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
         }
 
-        // 5. MangaDex At-Home Image Server Node Resolver
         if (event.httpMethod === 'GET' && path === '/mangadex/pages') {
             const chapterId = qs.chapterId;
             const url = `${MANGADEX_API}/at-home/server/${encodeURIComponent(chapterId)}`;
             const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
             const data = await res.json();
-            return {
-                statusCode: res.status,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            };
+            return { statusCode: res.status, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
         }
 
-        // 6. MangaKatana Search
         if (event.httpMethod === 'GET' && path === '/mangakatana/search') {
             const query = (qs.q || '').trim();
             let targetUrl = `${MANGAKATANA_BASE}/manga`;
@@ -387,28 +386,18 @@ exports.handler = async (event) => {
             const res = await fetch(targetUrl, { headers: MK_HEADERS, redirect: 'follow' });
             const html = await res.text();
             const results = parseMangaKatanaHtmlSearch(html, res.url || targetUrl, query);
-            return {
-                statusCode: 200,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ result: 'ok', data: results })
-            };
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ result: 'ok', data: results }) };
         }
 
-        // 7. MangaKatana Chapters List
         if (event.httpMethod === 'GET' && path === '/mangakatana/chapters') {
             const rawUrl = (qs.url || qs.slug || '').trim();
             const targetUrl = rawUrl.startsWith('http') ? rawUrl : `${MANGAKATANA_BASE}/manga/${rawUrl.replace(/^\/+/, '')}`;
             const res = await fetch(targetUrl, { headers: MK_HEADERS, redirect: 'follow' });
             const html = await res.text();
             const chapters = parseMangaKatanaChaptersHtml(html);
-            return {
-                statusCode: 200,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ result: 'ok', data: chapters })
-            };
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ result: 'ok', data: chapters }) };
         }
 
-        // 8. MangaKatana Chapter Pages
         if (event.httpMethod === 'GET' && path === '/mangakatana/pages') {
             const targetUrl = (qs.url || '').trim();
             if (!targetUrl.startsWith('http')) {
@@ -417,60 +406,131 @@ exports.handler = async (event) => {
             const res = await fetch(targetUrl, { headers: MK_HEADERS, redirect: 'follow' });
             const html = await res.text();
             const pages = parseMangaKatanaPagesHtml(html);
-            return {
-                statusCode: 200,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ result: 'ok', pages })
-            };
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ result: 'ok', pages }) };
         }
 
-        // 9. Chapter Comments (/api/comments/:chapterId)
+        const db = await readDB();
+
+        if (event.httpMethod === 'GET' && (path === '/manga' || path === '/mangas' || path === '/')) {
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(db.mangas || []) };
+        }
+
+        if (event.httpMethod === 'POST' && (path === '/manga' || path === '/mangas' || path === '')) {
+            const manga = JSON.parse(event.body || '{}');
+            if (!manga || !manga.id) {
+                return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid manga payload' }) };
+            }
+            const idx = (db.mangas || []).findIndex(
+                m => m.id === manga.id ||
+                     (manga.mangadexId && m.mangadexId === manga.mangadexId) ||
+                     (manga.mangakatanaId && m.mangakatanaId === manga.mangakatanaId)
+            );
+            if (!db.mangas) db.mangas = [];
+            if (idx > -1) {
+                db.mangas[idx] = { ...db.mangas[idx], ...manga, id: db.mangas[idx].id };
+            } else {
+                db.mangas.unshift(manga);
+            }
+            await writeDB(db);
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(manga) };
+        }
+
+        if (event.httpMethod === 'DELETE' && path.startsWith('/mangas/')) {
+            const id = path.replace('/mangas/', '');
+            db.mangas = (db.mangas || []).filter(m => m.id !== id);
+            db.chapters = (db.chapters || []).filter(c => c.mangaId !== id);
+            await writeDB(db);
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        if (event.httpMethod === 'GET' && path.match(/^\/mangas\/[^\/]+\/chapters$/)) {
+            const mangaId = path.split('/')[2];
+            const chapters = (db.chapters || []).filter(c => c.mangaId === mangaId);
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(chapters) };
+        }
+
+        if (event.httpMethod === 'GET' && path.startsWith('/chapters/')) {
+            const id = path.replace('/chapters/', '');
+            const chapter = (db.chapters || []).find(c => c.id === id);
+            if (!chapter) return { statusCode: 404, headers, body: JSON.stringify({ error: 'Chapter not found' }) };
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(chapter) };
+        }
+
+        if (event.httpMethod === 'POST' && path === '/chapters') {
+            const chapter = JSON.parse(event.body || '{}');
+            if (!chapter || !chapter.id) {
+                return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid chapter data' }) };
+            }
+            if (!db.chapters) db.chapters = [];
+            const idx = db.chapters.findIndex(c => c.id === chapter.id);
+            if (idx > -1) {
+                db.chapters[idx] = chapter;
+            } else {
+                db.chapters.push(chapter);
+            }
+            await writeDB(db);
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(chapter) };
+        }
+
+        if (event.httpMethod === 'POST' && path === '/chapters/bulk') {
+            const body = JSON.parse(event.body || '{}');
+            const chapters = body.chapters;
+            if (!Array.isArray(chapters)) {
+                return { statusCode: 400, headers, body: JSON.stringify({ error: 'Chapters array required' }) };
+            }
+            if (!db.chapters) db.chapters = [];
+            chapters.forEach(ch => {
+                const idx = db.chapters.findIndex(c => c.id === ch.id);
+                if (idx > -1) db.chapters[idx] = ch;
+                else db.chapters.push(ch);
+            });
+            await writeDB(db);
+            return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true, count: chapters.length }) };
+        }
+
+        if (path === '/monetization') {
+            if (event.httpMethod === 'GET') {
+                return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(db.monetization || {}) };
+            }
+            if (event.httpMethod === 'POST' || event.httpMethod === 'PUT') {
+                const settings = JSON.parse(event.body || '{}');
+                db.monetization = settings;
+                await writeDB(db);
+                return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(db.monetization) };
+            }
+        }
+
         if (path.startsWith('/comments/')) {
             const parts = path.replace(/^\/comments\//, '').split('/');
             const chapterId = decodeURIComponent(parts[0] || '');
             const commentId = parts[1] ? decodeURIComponent(parts[1]) : null;
-            global.__vaniscansComments = global.__vaniscansComments || {};
+
+            if (!db.comments) db.comments = {};
 
             if (event.httpMethod === 'GET') {
-                return {
-                    statusCode: 200,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(global.__vaniscansComments[chapterId] || [])
-                };
+                return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(db.comments[chapterId] || []) };
             }
             if (event.httpMethod === 'POST') {
                 const body = JSON.parse(event.body || '{}');
-                if (!body || !body.text) {
-                    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Comment text required' }) };
+                if (!body || !body.text) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Comment text required' }) };
+                if (!Array.isArray(db.comments[chapterId])) {
+                    db.comments[chapterId] = [];
                 }
-                if (!Array.isArray(global.__vaniscansComments[chapterId])) {
-                    global.__vaniscansComments[chapterId] = [];
-                }
-                global.__vaniscansComments[chapterId].unshift(body);
-                return {
-                    statusCode: 200,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                };
+                db.comments[chapterId].unshift(body);
+                await writeDB(db);
+                return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
             }
             if (event.httpMethod === 'DELETE' && commentId) {
-                if (Array.isArray(global.__vaniscansComments[chapterId])) {
-                    global.__vaniscansComments[chapterId] = global.__vaniscansComments[chapterId].filter(c => c.id !== commentId);
+                if (Array.isArray(db.comments[chapterId])) {
+                    db.comments[chapterId] = db.comments[chapterId].filter(c => c.id !== commentId);
+                    await writeDB(db);
                 }
-                return {
-                    statusCode: 200,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ success: true })
-                };
+                return { statusCode: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
             }
         }
 
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Endpoint not found' }) };
     } catch (err) {
-        return {
-            statusCode: 500,
-            headers,
-            body: JSON.stringify({ error: err.message || 'Server error' })
-        };
+        return { statusCode: 500, headers, body: JSON.stringify({ error: err.message || 'Server error' }) };
     }
 };
