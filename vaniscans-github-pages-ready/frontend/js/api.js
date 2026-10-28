@@ -1026,7 +1026,7 @@ class ApiService {
         }
 
         // Allow scanning through all available chapters if a few chapters fail or need retry, so 100 requested = 100 pulled!
-        const candidates = allChapters.slice(0, maxChapters + 30);
+        const candidates = allChapters.slice(0, maxChapters + 1000);
         const totalGoal = Math.min(maxChapters, allChapters.length);
         const finalChapters = [];
 
@@ -1081,7 +1081,7 @@ class ApiService {
 
     getLocalCommentsMap() {
         try {
-            return JSON.parse(localStorage.getItem('vaniscans_chapter_comments_v1') || '{}');
+            return JSON.parse(localStorage.getItem('vaniscans_chapter_comments_v2') || '{}');
         } catch (_) {
             return {};
         }
@@ -1089,7 +1089,7 @@ class ApiService {
 
     saveLocalCommentsMap(map) {
         try {
-            localStorage.setItem('vaniscans_chapter_comments_v1', JSON.stringify(map));
+            localStorage.setItem('vaniscans_chapter_comments_v2', JSON.stringify(map));
         } catch (_) {}
     }
 
@@ -1101,7 +1101,7 @@ class ApiService {
         let remoteList = [];
         try {
             const res = await fetch(`${API_BASE}/comments/${encodeURIComponent(chapterId)}`, {
-                signal: AbortSignal.timeout(2500)
+                signal: AbortSignal.timeout(3000)
             });
             if (res.ok) {
                 const ct = res.headers.get('content-type') || '';
