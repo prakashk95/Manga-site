@@ -361,9 +361,18 @@
                         <p class="text-xs text-slate-400">Manage series, upload single chapters, or crawl real chapters + images from MangaDex.org.</p>
                     </div>
                 </div>
-                <button onclick="app.adminLogout()" class="px-4 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2 w-fit">
-                    <i data-lucide="log-out" class="w-4 h-4"></i> Lock Panel
-                </button>
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <button onclick="app.exportCatalogBackup()" class="px-4 py-2 bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2">
+                        <i data-lucide="download" class="w-4 h-4"></i> Export Catalog Backup (.JSON)
+                    </button>
+                    <label class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer">
+                        <i data-lucide="upload" class="w-4 h-4"></i> Restore Backup
+                        <input type="file" accept=".json,application/json" class="hidden" onchange="app.importCatalogBackup(this.files[0])">
+                    </label>
+                    <button onclick="app.adminLogout()" class="px-4 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2">
+                        <i data-lucide="log-out" class="w-4 h-4"></i> Lock Panel
+                    </button>
+                </div>
             </div>
 
             <div class="flex border-b border-[#21243b] text-xs font-bold overflow-x-auto">

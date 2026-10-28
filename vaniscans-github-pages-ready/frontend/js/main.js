@@ -241,6 +241,56 @@ class App {
         }
     }
 
+    async exportCatalogBackup() {
+        const mangas = await this.api.getAllMangas();
+        const chapters = [];
+        for (const m of mangas) {
+            const chs = await this.api.getChaptersForManga(m.id);
+            chapters.push(...chs);
+        }
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            mangas,
+            chapters,
+            monetization: this.monetization
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `vaniscans-catalog-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        this.showToast(`Exported ${mangas.length} series & ${chapters.length} chapters!`, 'success');
+    }
+
+    async importCatalogBackup(file) {
+        if (!file) return;
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            const mangas = Array.isArray(data.mangas) ? data.mangas : [];
+            const chapters = Array.isArray(data.chapters) ? data.chapters : [];
+            for (const m of mangas) {
+                await this.api.saveManga(m);
+            }
+            if (chapters.length > 0) {
+                await this.api.bulkSaveChapters(chapters);
+            }
+            this.mangas = await this.api.getAllMangas();
+            this.updateSeriesSelectOptions();
+            this.renderAdminSeriesList();
+            this.renderHeroCarousel();
+            await this.renderMangaGrid();
+            this.renderPopularSidebar();
+            this.showToast(`Restored ${mangas.length} series & ${chapters.length} chapters!`, 'success');
+        } catch (err) {
+            this.showToast('Invalid backup JSON file', 'error');
+        }
+    }
+
     adminLogout() {
         sessionStorage.removeItem('vaniscans_admin_auth');
         this.showToast('Admin panel locked', 'info');
