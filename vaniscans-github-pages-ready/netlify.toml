@@ -2,10 +2,13 @@
   publish = "frontend"
   functions = "netlify/functions"
 
+# /api/* MUST reach the function. Placed first with a higher-priority 200 rule
+# so the catch-all SPA redirect below can never swallow API requests.
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
+  force = true
 
 [[redirects]]
   from = "/comics/*"
@@ -17,6 +20,7 @@
   to = "/index.html"
   status = 200
 
+# SPA catch-all — must come LAST so /api/* is handled by the rule above.
 [[redirects]]
   from = "/*"
   to = "/index.html"

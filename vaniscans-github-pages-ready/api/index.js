@@ -15,11 +15,91 @@ const MK_HEADERS = {
     'Referer': 'https://mangakatana.com/'
 };
 
-const LOCAL_DB_PATH = path.join(__dirname, '../backend/data/manga.json');
+const LOCAL_DB_PATH = (function resolveDbPath() {
+    const candidates = [
+        path.join(__dirname, 'manga.json'),
+        path.join(__dirname, '..', 'data', 'manga.json'),
+        path.join(process.cwd(), 'backend', 'data', 'manga.json'),
+        path.join('/tmp', 'vaniscans-manga.json')
+    ];
+    for (const p of candidates) {
+        try {
+            const dir = path.dirname(p);
+            if (fs.existsSync(dir) && fs.existsSync(p)) return p;
+        } catch (_) {}
+    }
+    return candidates[candidates.length - 1];
+})();
+
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.replace(/\/$/, '') : '';
 const FIREBASE_SECRET = process.env.FIREBASE_SECRET || '';
 
-// Firebase & Local Database Helpers
+let memoryDB = null;
+
+function emptyDB() {
+    return { mangas: [], chapters: [], comments: {}, monetization: {} };
+}
+
+const SEED_DB = {
+    mangas: [
+        {
+            id: 'manga-seed-1',
+            mangadexId: '9b3398e6-7c3e-4f3a-9b3d-3f7c0e2e5a1c',
+            title: 'Solo Leveling',
+            author: 'Chugong',
+            cover: 'https://uploads.mangadex.org/covers/9b3398e6-7c3e-4f3a-9b3d-3f7c0e2e5a1c/512.jpg',
+            banner: 'https://uploads.mangadex.org/covers/9b3398e6-7c3e-4f3a-9b3d-3f7c0e2e5a1c/512.jpg',
+            genres: ['Action', 'Fantasy', 'Regression'],
+            status: 'Ongoing',
+            rating: 9.8,
+            synopsis: 'E-rank hunter Jin-woo is the weakest. After a near-fatal dungeon encounter, a mysterious system offers him a second chance — to level up or die trying.',
+            updatedAt: Date.now()
+        },
+        {
+            id: 'manga-seed-2',
+            mangadexId: '3457a6e1-2f6b-4c8a-9d3e-7f1a2b3c4d5e',
+            title: 'Chainsaw Man',
+            author: 'Tatsuki Fujimoto',
+            cover: 'https://uploads.mangadex.org/covers/3457a6e1-2f6b-4c8a-9d3e-7f1a2b3c4d5e/512.jpg',
+            banner: 'https://uploads.mangadex.org/covers/3457a6e1-2f6b-4c8a-9d3e-7f1a2b3c4d5e/512.jpg',
+            genres: ['Action', 'Horror'],
+            status: 'Completed',
+            rating: 9.7,
+            synopsis: 'Denji is a poor young man who becomes Chainsaw Man — a devil hunter with a chainsaw for a heart — and dives headfirst into a brutal war with devils.',
+            updatedAt: Date.now()
+        },
+        {
+            id: 'manga-seed-3',
+            mangadexId: '7a2f4c8e-1b3d-4e6f-9a2c-5d7e8f1a3b9c',
+            title: 'One Piece',
+            author: 'Eiichiro Oda',
+            cover: 'https://uploads.mangadex.org/covers/7a2f4c8e-1b3d-4e6f-9a2c-5d7e8f1a3b9c/512.jpg',
+            banner: 'https://uploads.mangadex.org/covers/7a2f4c8e-1b3d-4e6f-9a2c-5d7e8f1a3b9c/512.jpg',
+            genres: ['Adventure', 'Action', 'Fantasy'],
+            status: 'Ongoing',
+            rating: 9.9,
+            synopsis: 'Monkey D. Luffy sets sail to become the Pirate King, gathering a crew and facing the most fearsome oceans and enemies the world has to offer.',
+            updatedAt: Date.now()
+        },
+        {
+            id: 'manga-seed-4',
+            mangadexId: '1c9e5b2a-4d8f-4736-a1e0-6f2c8b4d7e91',
+            title: 'Jujutsu Kaisen',
+            author: 'Gege Akutami',
+            cover: 'https://uploads.mangadex.org/covers/1c9e5b2a-4d8f-4736-a1e0-6f2c8b4d7e91/512.jpg',
+            banner: 'https://uploads.mangadex.org/covers/1c9e5b2a-4d8f-4736-a1e0-6f2c8b4d7e91/512.jpg',
+            genres: ['Action', 'Supernatural'],
+            status: 'Completed',
+            rating: 9.6,
+            synopsis: 'Yuji Itadori swallows a cursed finger to save his friends, becoming the host of a terrifying curse and joining a school of jujutsu sorcerers.',
+            updatedAt: Date.now()
+        }
+    ],
+    chapters: [],
+    comments: {},
+    monetization: {}
+};
+
 async function readDB() {
     if (FIREBASE_DB_URL) {
         try {
@@ -27,22 +107,34 @@ async function readDB() {
             const res = await fetch(`${FIREBASE_DB_URL}/db.json${authParam}`);
             if (res.ok) {
                 const data = await res.json();
-                if (data) return data;
+                if (data) {
+                    memoryDB = data;
+                    return data;
+                }
             }
         } catch (e) {
             console.error('Firebase readDB error:', e.message);
         }
     }
+    if (memoryDB) return memoryDB;
     try {
         if (fs.existsSync(LOCAL_DB_PATH)) {
             const raw = fs.readFileSync(LOCAL_DB_PATH, 'utf-8');
-            return JSON.parse(raw);
+            const data = JSON.parse(raw);
+            memoryDB = data;
+            return data;
         }
-    } catch (e) {}
-    return { mangas: [], chapters: [], comments: {}, monetization: {} };
+    } catch (e) {
+        console.error('Local readDB error:', e.message);
+    }
+    memoryDB = SEED_DB;
+    return SEED_DB;
 }
 
 async function writeDB(dbData) {
+    memoryDB = dbData;
+    let anySucceeded = false;
+
     if (FIREBASE_DB_URL) {
         try {
             const authParam = FIREBASE_SECRET ? `?auth=${FIREBASE_SECRET}` : '';
@@ -51,15 +143,20 @@ async function writeDB(dbData) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(dbData)
             });
-            if (res.ok) return true;
+            if (res.ok) anySucceeded = true;
         } catch (e) {
             console.error('Firebase writeDB error:', e.message);
         }
     }
     try {
+        const dir = path.dirname(LOCAL_DB_PATH);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(dbData, null, 2), 'utf-8');
-    } catch (e) {}
-    return true;
+        anySucceeded = true;
+    } catch (e) {
+        console.error('Local writeDB error:', e.message);
+    }
+    return anySucceeded;
 }
 
 function stripHtmlTags(str) {
