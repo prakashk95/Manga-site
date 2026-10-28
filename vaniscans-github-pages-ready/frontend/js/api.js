@@ -778,7 +778,7 @@ class ApiService {
     async resolveMangaDexChapterPages(mangadexChapterId, preferDataSaver = true) {
         const detailed = await this.resolveMangaDexChapterPagesDetailed(mangadexChapterId);
         return preferDataSaver ? detailed.pages : detailed.pagesSaver;
-    
+    }
 
     // =========================================================================
     // 2. MANGAKATANA.COM LIVE CRAWLER (Search, Chapter List & Page Resolver)
@@ -1069,8 +1069,6 @@ class ApiService {
 
         return finalChapters;
     }
-}
-
 
     // =========================================================================
     // CHAPTER COMMENTS / CHAT PERSISTENCE (LocalStorage + Backend Sync)
