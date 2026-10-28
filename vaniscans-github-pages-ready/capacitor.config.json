@@ -1,0 +1,8 @@
+{
+  "appId": "com.vaniscans.app",
+  "appName": "VaniScans",
+  "webDir": "frontend",
+  "server": {
+    "androidScheme": "https"
+  }
+}
