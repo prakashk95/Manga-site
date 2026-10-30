@@ -1,38 +1,41 @@
-import Link from 'next/link';
+'use client';
 
-export default function Pagination({ page, totalPages, searchQuery }) {
-    const searchParam = searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : '';
+import React from 'react';
+
+export default function Pagination({ currentPage, totalPages, onPageChange }) {
     if (totalPages <= 1) return null;
 
     return (
-        <div className="flex items-center justify-center gap-4 my-8">
-            {page > 1 ? (
-                <Link
-                    href={`/?page=${page - 1}${searchParam}`}
-                    className="px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm hover:bg-dark-700 transition"
-                >
-                    &larr; Prev page
-                </Link>
-            ) : (
-                <span className="px-4 py-2 bg-dark-800/40 border border-dark-700/40 rounded-lg text-sm text-gray-600 cursor-not-allowed">
-                    &larr; Prev page
-                </span>
-            )}
-            <span className="text-sm text-gray-400">
-                Page <strong className="text-white">{page}</strong> of <strong className="text-white">{totalPages}</strong>
+        <div className="flex items-center justify-center gap-3 pt-8 pb-4">
+            <button
+                type="button"
+                disabled={currentPage <= 1}
+                onClick={() => onPageChange(currentPage - 1)}
+                className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold border transition ${
+                    currentPage > 1
+                        ? 'bg-[#172336] hover:bg-[#1f304a] text-slate-200 border-[#24344d] cursor-pointer'
+                        : 'bg-[#121c2c]/60 text-slate-600 border-[#1a263b] cursor-not-allowed'
+                }`}
+            >
+                &larr; Prev page
+            </button>
+
+            <span className="text-xs text-slate-400 px-2">
+                Page <strong className="text-white">{currentPage}</strong> of <strong className="text-white">{totalPages}</strong>
             </span>
-            {page < totalPages ? (
-                <Link
-                    href={`/?page=${page + 1}${searchParam}`}
-                    className="px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm hover:bg-dark-700 transition"
-                >
-                    Next page &rarr;
-                </Link>
-            ) : (
-                <span className="px-4 py-2 bg-dark-800/40 border border-dark-700/40 rounded-lg text-sm text-gray-600 cursor-not-allowed">
-                    Next page &rarr;
-                </span>
-            )}
+
+            <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => onPageChange(currentPage + 1)}
+                className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold border transition ${
+                    currentPage < totalPages
+                        ? 'bg-[#172336] hover:bg-[#1f304a] text-slate-200 border-[#24344d] cursor-pointer'
+                        : 'bg-[#121c2c]/60 text-slate-600 border-[#1a263b] cursor-not-allowed'
+                }`}
+            >
+                Next page &rarr;
+            </button>
         </div>
     );
 }

@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    serverExternalPackages: ['@libsql/client'],
+    serverExternalPackages: ['@libsql/client', 'sql.js'],
     images: {
-        domains: ['uploads.mangadex.org', 'mangakatana.com', 'placehold.co', 'wsrv.nl', 'img.mangasual.com', 'manhwaclan.com'],
+        domains: ['uploads.mangadex.org', 'mangakatana.com', 'placehold.co', 'wsrv.nl'],
     },
 };
 

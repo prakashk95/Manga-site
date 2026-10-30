@@ -5,18 +5,20 @@ module.exports = {
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        dark: {
-          900: '#0f172a',
-          800: '#1e293b',
-          700: '#334155',
-          600: '#475569',
-        },
-        accent: {
-          DEFAULT: '#3b82f6',
-          hover: '#2563eb',
+        asura: {
+          bg: '#0c0d14',
+          card: '#121421',
+          cardHover: '#181b2c',
+          border: '#23273e',
+          primary: '#8b5cf6',
+          primaryHover: '#7c3aed',
+          accent: '#a855f7',
+          glow: 'rgba(139, 92, 246, 0.35)',
+          textMuted: '#94a3b8'
         }
       },
     },
