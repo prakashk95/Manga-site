@@ -1,8 +1,7 @@
 services:
   - type: web
-    name: vaniscans-manga-platform
+    name: vaniscans-nextjs-platform
     env: node
-    rootDir: backend
-    buildCommand: npm install
+    buildCommand: npm install && npm run build
     startCommand: npm start
     plan: free
