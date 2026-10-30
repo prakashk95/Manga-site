@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: vaniscans-nextjs-platform
-    env: node
-    buildCommand: npm install && npm run build
-    startCommand: npm start
-    plan: free
