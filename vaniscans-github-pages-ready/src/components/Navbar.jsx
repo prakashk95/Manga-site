@@ -1,4 +1,4 @@
-\'use client\';
+'use client';
 import Link from 'next/link';
 import { Search, Compass } from 'lucide-react';
 import { useState } from 'react';
