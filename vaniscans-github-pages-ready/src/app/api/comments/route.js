@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { isAdminRequest, unauthorized } from '@/lib/adminAuth';
 
 export async function GET(req) {
     try {
@@ -54,6 +55,7 @@ export async function POST(req) {
 }
 
 export async function DELETE(req) {
+    if (!isAdminRequest(req)) return unauthorized();
     try {
         const url = new URL(req.url);
         const chapterId = url.searchParams.get('chapterId');

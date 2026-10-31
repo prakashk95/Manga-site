@@ -1,38 +1,40 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import crypto from 'crypto';
-
-const ADMIN_USER_HASH = '059a50ce956b7ec61527c7ecc0c55b5a009dc54ab4acddce8852b46baa2aba30';
-const ADMIN_PASS_HASH = '9109551a88284a2754a704d50d6636fc596ae718df126354742f1637940bbc5a';
-
-function safeCompareHex(a, b) {
-    if (!a || !b || a.length !== 64 || b.length !== 64) return false;
-    try {
-        return crypto.timingSafeEqual(
-            Buffer.from(a.toLowerCase(), 'utf-8'),
-            Buffer.from(b.toLowerCase(), 'utf-8')
-        );
-    } catch (_) {
-        return false;
-    }
-}
+import { ADMIN_COOKIE, createSessionValue, isAdminRequest, checkAdminLogin, SESSION_MAX_AGE_SECONDS } from '@/lib/adminAuth';
 
 export async function POST(req) {
     try {
         const body = await req.json();
-        const { userHash, userLowerHash, passHash } = body || {};
+        const { username, password } = body || {};
 
-        const userOk = safeCompareHex(userHash, ADMIN_USER_HASH) || safeCompareHex(userLowerHash, ADMIN_USER_HASH);
-        const passOk = safeCompareHex(passHash, ADMIN_PASS_HASH);
-
-        if (userOk && passOk) {
-            return NextResponse.json({
-                success: true,
-                token: crypto.randomBytes(24).toString('hex')
-            });
+        if (!checkAdminLogin(username, password)) {
+            return NextResponse.json({ success: false, message: 'Incorrect credentials' }, { status: 401 });
         }
-        return NextResponse.json({ success: false, message: 'Incorrect credentials' }, { status: 401 });
+
+        const session = createSessionValue();
+        if (!session) {
+            return NextResponse.json({ success: false, message: 'Server is missing ADMIN_SESSION_SECRET (set it in your host environment variables, 16+ random characters).' }, { status: 500 });
+        }
+        const res = NextResponse.json({ success: true });
+        res.cookies.set(ADMIN_COOKIE, session, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            path: '/',
+            maxAge: SESSION_MAX_AGE_SECONDS
+        });
+        return res;
     } catch (err) {
         return NextResponse.json({ error: err.message }, { status: 500 });
     }
+}
+
+export async function GET(req) {
+    return NextResponse.json({ authed: isAdminRequest(req) });
+}
+
+export async function DELETE() {
+    const res = NextResponse.json({ success: true });
+    res.cookies.set(ADMIN_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 });
+    return res;
 }

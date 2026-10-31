@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 import { NextResponse } from 'next/server';
+import { isAdminRequest, unauthorized } from '@/lib/adminAuth';
 import {
     parseMangaKatanaHtmlSearch,
     fetchHtmlWithFallback,
@@ -12,6 +13,7 @@ const MANGADEX_API = 'https://api.mangadex.org';
 const USER_AGENT = 'VaniScans/5.0 (+https://vaniscans.online)';
 
 export async function GET(req) {
+    if (!isAdminRequest(req)) return unauthorized();
     const url = new URL(req.url);
     const q = (url.searchParams.get('q') || '').trim();
     const source = url.searchParams.get('source') || 'mangadex';

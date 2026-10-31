@@ -1,8 +1,10 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { loadTursoRuntimeConfig, saveTursoRuntimeConfig, getDb } from '@/lib/db';
+import { isAdminRequest, unauthorized } from '@/lib/adminAuth';
 
-export async function GET() {
+export async function GET(req) {
+    if (!isAdminRequest(req)) return unauthorized();
     try {
         const cfg = await loadTursoRuntimeConfig();
         return NextResponse.json({
@@ -18,6 +20,7 @@ export async function GET() {
 }
 
 export async function POST(req) {
+    if (!isAdminRequest(req)) return unauthorized();
     try {
         const { url, authToken } = await req.json();
         await saveTursoRuntimeConfig(url, authToken);

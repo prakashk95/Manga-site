@@ -4,8 +4,6 @@ const STORE_MANGAS = 'mangas';
 const STORE_CHAPTERS = 'chapters';
 
 // Cryptographic SHA-256 Hashes for Admin Gateway
-export const ADMIN_USER_SHA256 = '059a50ce956b7ec61527c7ecc0c55b5a009dc54ab4acddce8852b46baa2aba30';
-export const ADMIN_PASS_SHA256 = '9109551a88284a2754a704d50d6636fc596ae718df126354742f1637940bbc5a';
 
 function pureJsSha256(ascii) {
     function rightRotate(value, amount) {
@@ -88,34 +86,14 @@ export async function sha256Hash(text) {
 }
 
 export async function verifyAdminCredentials(username, password) {
-    const cleanUser = (username || '').trim();
-    const cleanPass = password || '';
-    const userHash = (await sha256Hash(cleanUser)).toLowerCase();
-    const userLowerHash = (await sha256Hash(cleanUser.toLowerCase())).toLowerCase();
-    const passHash = (await sha256Hash(cleanPass)).toLowerCase();
-    const passTrimHash = (await sha256Hash(cleanPass.trim())).toLowerCase();
-
-    // 1. Instant local SHA-256 verification (matches original frontend/js/api.js behavior)
-    if (
-        (userHash === ADMIN_USER_SHA256 || userLowerHash === ADMIN_USER_SHA256) &&
-        (passHash === ADMIN_PASS_SHA256 || passTrimHash === ADMIN_PASS_SHA256)
-    ) {
-        return true;
-    }
-
-    // 2. Also verify against backend endpoint
-    try {
-        const res = await fetch('/api/auth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userHash, userLowerHash, passHash })
-        });
-        if (res.ok) {
-            const data = await res.json();
-            if (data && data.success) return true;
-        }
-    } catch (_) {}
-
+    const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: (username || '').trim(), password: password || '' })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data && data.success) return true;
+    if (res.status === 500 && data && data.message) throw new Error(data.message);
     return false;
 }
 

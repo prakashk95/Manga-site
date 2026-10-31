@@ -1,16 +1,17 @@
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 import { NextResponse } from 'next/server';
-import { getDb, invalidateDbCache } from '@/lib/db';
+import { getDb } from '@/lib/db';
+import { isAdminRequest, unauthorized } from '@/lib/adminAuth';
 
 export async function POST(req) {
+    if (!isAdminRequest(req)) return unauthorized();
     try {
         const db = await getDb();
         const chapter = await req.json();
         if (!chapter || !chapter.id || !chapter.mangaId) {
             return NextResponse.json({ error: 'Invalid chapter data' }, { status: 400 });
         }
-        const now = Date.now();
         const pagesJson = JSON.stringify(Array.isArray(chapter.pages) ? chapter.pages : []);
         const pagesSaverJson = JSON.stringify(Array.isArray(chapter.pagesSaver) ? chapter.pagesSaver : (chapter.pages || []));
 
@@ -40,17 +41,11 @@ export async function POST(req) {
                 Number(chapter.number) || 1,
                 pagesJson,
                 pagesSaverJson,
-                Number(chapter.atHomeUpdatedAt) || now,
-                Number(chapter.createdAt) || now
+                Number(chapter.atHomeUpdatedAt) || Date.now(),
+                Number(chapter.createdAt) || Date.now()
             ]
         });
 
-        await db.execute({
-            sql: 'UPDATE mangas SET updatedAt = ? WHERE id = ?',
-            args: [now, chapter.mangaId]
-        });
-
-        invalidateDbCache();
         return NextResponse.json(chapter);
     } catch (err) {
         return NextResponse.json({ error: err.message }, { status: 500 });

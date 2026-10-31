@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { isAdminRequest, unauthorized } from '@/lib/adminAuth';
 
 export async function GET(req, { params }) {
     try {
@@ -34,6 +35,7 @@ export async function GET(req, { params }) {
 }
 
 export async function DELETE(req, { params }) {
+    if (!isAdminRequest(req)) return unauthorized();
     try {
         const db = await getDb();
         const { id } = await params;

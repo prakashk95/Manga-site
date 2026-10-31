@@ -81,12 +81,20 @@ export default function AdminPanelPage() {
     };
 
     useEffect(() => {
-        const auth = sessionStorage.getItem('vaniscans_admin_auth');
-        if (auth === 'true') {
-            setIsAuthed(true);
-            loadMangas();
-            loadMonetization();
-        }
+        (async () => {
+            try {
+                const r = await fetch('/api/auth', { cache: 'no-store' });
+                const d = await r.json();
+                if (d && d.authed) {
+                    sessionStorage.setItem('vaniscans_admin_auth', 'true');
+                    setIsAuthed(true);
+                    loadMangas();
+                    loadMonetization();
+                    return;
+                }
+            } catch (_) {}
+            sessionStorage.removeItem('vaniscans_admin_auth');
+        })();
     }, []);
 
     const loadMangas = async () => {
@@ -779,7 +787,7 @@ export default function AdminPanelPage() {
                     </div>
                     <div className="flex gap-3">
                         <Link href="/" className="px-4 py-2 bg-[#1a1d30] hover:bg-[#232742] text-slate-200 rounded-xl text-xs font-bold transition">Visit Site</Link>
-                        <button onClick={() => { sessionStorage.removeItem('vaniscans_admin_auth'); setIsAuthed(false); }} className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition">Lock Panel</button>
+                        <button onClick={() => { fetch('/api/auth', { method: 'DELETE' }).catch(() => {}); sessionStorage.removeItem('vaniscans_admin_auth'); setIsAuthed(false); }} className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition">Lock Panel</button>
                     </div>
                 </div>
 

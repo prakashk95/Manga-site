@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 import { NextResponse } from 'next/server';
+import { isAdminRequest, unauthorized } from '@/lib/adminAuth';
 import {
     parseMangaKatanaChaptersHtml,
     fetchHtmlWithFallback,
@@ -67,6 +68,7 @@ async function fetchMangaDexFeedChapters(mangaId, lang) {
 }
 
 export async function GET(req) {
+    if (!isAdminRequest(req)) return unauthorized();
     const url = new URL(req.url);
     const source = url.searchParams.get('source') || 'mangadex';
 

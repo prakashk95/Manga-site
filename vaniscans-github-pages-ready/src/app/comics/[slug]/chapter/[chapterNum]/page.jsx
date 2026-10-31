@@ -91,7 +91,7 @@ function MangaPageImage({ rawUrl, pageNum }) {
             <img
                 src={currentSrc}
                 alt={`Page ${pageNum}`}
-                loading="eager"
+                loading={pageNum <= 3 ? 'eager' : 'lazy'}
                 decoding="async"
                 referrerPolicy="no-referrer"
                 onLoad={() => setLoaded(true)}
@@ -124,6 +124,8 @@ export default function ChapterReaderPage() {
 
     // Comments state
     const [comments, setComments] = useState([]);
+    const [isAdminUi, setIsAdminUi] = useState(false);
+    useEffect(() => { try { setIsAdminUi(sessionStorage.getItem('vaniscans_admin_auth') === 'true'); } catch (_) {} }, []);
     const [nickname, setNickname] = useState('');
     const [commentText, setCommentText] = useState('');
 
@@ -446,7 +448,7 @@ export default function ChapterReaderPage() {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between">
                                             <span className="text-xs font-bold text-white">{c.author}</span>
-                                            <button type="button" onClick={() => handleDeleteComment(c.id)} className="text-[11px] text-rose-400 hover:text-rose-300">Delete</button>
+                                            {isAdminUi && (<button type="button" onClick={() => handleDeleteComment(c.id)} className="text-[11px] text-rose-400 hover:text-rose-300">Delete</button>)}
                                         </div>
                                         <p className="text-xs text-slate-300 mt-1 break-words">{c.text}</p>
                                     </div>
