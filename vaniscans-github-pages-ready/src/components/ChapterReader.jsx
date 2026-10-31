@@ -64,7 +64,7 @@ function MangaPageImage({ rawUrl, pageNum, chapterUrl = '' }) {
 
     if (!rawUrl) return null;
 
-const chParam = chapterUrl ? `&chapterUrl=${encodeURIComponent(chapterUrl)}` : '';
+    const chParam = chapterUrl ? `&chapterUrl=${encodeURIComponent(chapterUrl)}` : '';
     const sources = [
         `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}${chParam}`,
         `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`,
@@ -225,7 +225,8 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 }
             } catch (_) {}
         } else if (needsRefresh && (chapterObj.mangakatanaChapterUrl || chapterObj.url)) {
-            const mkUrl = chapterObj.mangakatanaChapterUrl || chapterObj.url;
+            const rawMkUrl = chapterObj.mangakatanaChapterUrl || chapterObj.url;
+            const mkUrl = rawMkUrl.startsWith('http') ? rawMkUrl : `https://mangakatana.com${rawMkUrl.startsWith('/') ? '' : '/'}${rawMkUrl}`;
             try {
                 let freshPages = [];
                 const proxyRes = await fetch(`/api/proxy/img?mode=html&url=${encodeURIComponent(mkUrl)}`, { cache: 'no-store' });
@@ -322,7 +323,9 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
     const pages = currentChapter.pages || [];
     const ads = monetization?.ads || {};
     const rawChUrl = currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
-    const activeChapterUrl = rawChUrl.startsWith('http') ? rawChUrl : `https://mangakatana.com${rawChUrl}`;
+    const activeChapterUrl = rawChUrl.startsWith('http') 
+        ? rawChUrl 
+        : (rawChUrl ? `https://mangakatana.com${rawChUrl.startsWith('/') ? '' : '/'}${rawChUrl}` : '');
 
     return (
         <div className="min-h-screen bg-[#07080d] text-slate-100 flex flex-col select-none">
