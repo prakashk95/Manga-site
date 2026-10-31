@@ -155,7 +155,7 @@ export default function CatalogInteractive({ initialMangas = [] }) {
     const getMangaSlug = (m) => {
         if (!m) return 'series';
         const base = (m.title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-        const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.id || '').replace(/^manga-(md|mk|mf)-/, '').slice(0, 8);
+        const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.manhuausId || m.id || '').replace(/^manga-(md|mk|mf|mu)-/, '').slice(0, 8);
         return hash ? `${base}-${hash}` : base;
     };
 
@@ -477,20 +477,24 @@ export default function CatalogInteractive({ initialMangas = [] }) {
 
             {/* Footer */}
             <footer className="bg-[#0a0b10] border-t border-[#1a1c2b] py-10 mt-auto text-xs text-slate-500">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white font-bold">⚡</div>
-                        <div>
-                            <div className="font-black text-slate-300 text-sm">VANISCANS</div>
-                            <div>High performance manhwa & webtoon reading hub.</div>
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col gap-6">
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white font-bold">⚡</div>
+                            <div>
+                                <div className="font-black text-slate-300 text-sm">VANISCANS</div>
+                                <div>High performance manhwa & webtoon reading hub.</div>
+                            </div>
                         </div>
+                        <nav aria-label="Footer Legal Navigation" className="flex flex-wrap justify-center gap-6 text-slate-300 font-medium">
+                            <a href="/about" className="hover:text-purple-400 transition">About Us</a>
+                            <a href="/privacy" className="hover:text-purple-400 transition">Privacy Policy</a>
+                            <a href="/terms" className="hover:text-purple-400 transition">Terms of Service</a>
+                            <a href="/dmca" className="hover:text-purple-400 transition">DMCA</a>
+                            <a href="/contact" className="hover:text-purple-400 transition">Contact Us</a>
+                        </nav>
+                        <div>&copy; 2026 VaniScans. All rights reserved.</div>
                     </div>
-                    <div className="flex flex-wrap justify-center gap-6 text-slate-400 font-medium">
-                        <button onClick={() => { setShowBookmarksOnly(false); setActiveGenre('All'); }} className="hover:text-purple-400 transition">Home</button>
-                        <button onClick={() => { setShowBookmarksOnly(false); document.getElementById('catalogSection')?.scrollIntoView({ behavior: 'smooth' }); }} className="hover:text-purple-400 transition">Browse Catalog</button>
-                        <button onClick={() => setShowBookmarksOnly(true)} className="hover:text-purple-400 transition">Bookmarks</button>
-                    </div>
-                    <div>&copy; 2026 VaniScans. All rights reserved.</div>
                 </div>
             </footer>
         </div>

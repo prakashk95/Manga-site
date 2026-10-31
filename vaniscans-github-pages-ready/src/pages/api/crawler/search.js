@@ -1,5 +1,6 @@
 import {
     parseMangaKatanaHtmlSearch,
+    parseManhuausHtmlSearch,
     fetchHtmlWithFallback,
     formatMangaDexSearchData,
     fetchMangaFireSearch
@@ -11,9 +12,24 @@ const USER_AGENT = 'VaniScans/6.0 (+https://vaniscans.online)';
 export async function GET({ request }) {
     const url = new URL(request.url);
     const q = (url.searchParams.get('q') || '').trim();
-    const source = url.searchParams.get('source') || 'mangadex';
+    const rawSource = url.searchParams.get('source') || 'mangadex';
+    const source = q.includes('manhuaus.club') ? 'manhuaus' : rawSource;
 
-    if (source === 'mangafire') {
+    if (source === 'manhuaus') {
+        try {
+            let targetUrl = 'https://manhuaus.club/manga/?m_orderby=latest';
+            if (q.startsWith('http') && q.includes('manhuaus.club')) {
+                targetUrl = q;
+            } else if (q) {
+                targetUrl = `https://manhuaus.club/?s=${encodeURIComponent(q)}&post_type=wp-manga`;
+            }
+            const { html, finalUrl } = await fetchHtmlWithFallback(targetUrl);
+            const results = parseManhuausHtmlSearch(html, finalUrl || targetUrl, q);
+            return Response.json({ result: 'ok', data: results });
+        } catch (err) {
+            return Response.json({ error: err.message, data: [] }, { status: 500 });
+        }
+    } else if (source === 'mangafire') {
         try {
             const results = await fetchMangaFireSearch(q);
             return Response.json({ result: 'ok', data: results });

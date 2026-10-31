@@ -16,6 +16,9 @@ import {
     parseMangaKatanaHtmlSearch,
     parseMangaKatanaChaptersHtml,
     parseMangaKatanaPagesHtml,
+    parseManhuausHtmlSearch,
+    parseManhuausChaptersHtml,
+    parseManhuausPagesHtml,
     formatMangaDexSearchData,
     fetchMangaFireSearch,
     fetchMangaFireChapters,
@@ -335,13 +338,20 @@ export default function AdminPanelPage() {
 
     // Tab 3: Crawler Search & Chapter Selector
     const handleScan = async (presetQuery = null, forceSource = null) => {
-        const activeSrc = forceSource || crawlerSource;
-        if (forceSource) setCrawlerSource(forceSource);
         const q = presetQuery !== null ? presetQuery : searchQuery.trim();
         if (presetQuery !== null) setSearchQuery(presetQuery);
 
+        let activeSrc = forceSource || crawlerSource;
+        if (q.includes('manhuaus.club')) activeSrc = 'manhuaus';
+        else if (q.includes('mangakatana.com')) activeSrc = 'mangakatana';
+        if (forceSource || q.includes('manhuaus.club') || q.includes('mangakatana.com')) {
+            setCrawlerSource(activeSrc);
+        }
+
         const sourceLabel =
-            activeSrc === 'mangakatana'
+            activeSrc === 'manhuaus'
+                ? 'ManhuaUS.club'
+                : activeSrc === 'mangakatana'
                 ? 'MangaKatana.com'
                 : activeSrc === 'mangafire'
                 ? 'MangaFire'
@@ -361,7 +371,13 @@ export default function AdminPanelPage() {
 
             // Client-side fallback if serverless container returned 0 results
             if (list.length === 0) {
-                if (activeSrc === 'mangafire') {
+                if (activeSrc === 'manhuaus') {
+                    let targetUrl = 'https://manhuaus.club/manga/?m_orderby=latest';
+                    if (q.startsWith('http') && q.includes('manhuaus.club')) targetUrl = q;
+                    else if (q) targetUrl = `https://manhuaus.club/?s=${encodeURIComponent(q)}&post_type=wp-manga`;
+                    const html = await fetchClientHtmlFallback(targetUrl);
+                    list = parseManhuausHtmlSearch(html, targetUrl, q);
+                } else if (activeSrc === 'mangafire') {
                     list = await fetchMangaFireSearch(q);
                 } else if (activeSrc === 'mangakatana') {
                     let targetUrl = 'https://mangakatana.com/manga';
@@ -406,12 +422,15 @@ export default function AdminPanelPage() {
         setSelectedMangaToCrawl(item);
         setCrawledChaptersList([]);
         setCrawlChapterFilter('');
+        const isManhuaus = item.sourceHost === 'manhuaus.club' || !!item.manhuausId;
         const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
         const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
         setScannerStatus(`Loading full chapter list for "${item.title}"...`);
 
         try {
-            const endpoint = isMangaFire
+            const endpoint = isManhuaus
+                ? `/api/crawler/chapters?source=manhuaus&url=${encodeURIComponent(item.manhuausUrl || item.manhuausId)}`
+                : isMangaFire
                 ? `/api/crawler/chapters?source=mangafire&mangaId=${encodeURIComponent(item.mangafireId)}&lang=${encodeURIComponent(crawlerLang)}`
                 : isKatana
                 ? `/api/crawler/chapters?source=mangakatana&url=${encodeURIComponent(item.mangakatanaUrl || item.mangakatanaId)}`
@@ -423,7 +442,13 @@ export default function AdminPanelPage() {
 
             // Client-side fallback if serverless fetch returned 0 chapters
             if (list.length === 0) {
-                if (isMangaFire) {
+                if (isManhuaus) {
+                    const cleanUrl = (item.manhuausUrl || '').startsWith('http')
+                        ? item.manhuausUrl
+                        : `https://manhuaus.club/manga/${(item.manhuausId || '').replace(/^\/+|\/+$/g, '')}/`;
+                    const html = await fetchClientHtmlFallback(cleanUrl);
+                    list = parseManhuausChaptersHtml(html);
+                } else if (isMangaFire) {
                     list = await fetchMangaFireChapters(item.mangafireId, crawlerLang);
                 } else if (isKatana) {
                     const cleanUrl = (item.mangakatanaUrl || '').startsWith('http')
@@ -479,9 +504,12 @@ export default function AdminPanelPage() {
 
         try {
             const item = selectedMangaToCrawl;
+            const isManhuaus = item.sourceHost === 'manhuaus.club' || !!item.manhuausId;
             const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
             const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
-            const defaultId = isMangaFire
+            const defaultId = isManhuaus
+                ? `manga-mu-${(item.manhuausId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
+                : isMangaFire
                 ? `manga-mf-${(item.mangafireId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
                 : isKatana
                 ? `manga-mk-${(item.mangakatanaId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
@@ -493,6 +521,8 @@ export default function AdminPanelPage() {
                 mangakatanaId: item.mangakatanaId || null,
                 mangakatanaUrl: item.mangakatanaUrl || null,
                 mangafireId: item.mangafireId || null,
+                manhuausId: item.manhuausId || null,
+                manhuausUrl: item.manhuausUrl || null,
                 title: item.title,
                 author: item.author || 'Manga Creator',
                 cover: item.cover,
@@ -524,7 +554,9 @@ export default function AdminPanelPage() {
                 let pagesSaver = [];
 
                 try {
-                    const pageRes = isMangaFire
+                    const pageRes = isManhuaus
+                        ? await fetch(`/api/crawler/pages?source=manhuaus&url=${encodeURIComponent(ch.url)}`)
+                        : isMangaFire
                         ? await fetch(`/api/crawler/pages?source=mangafire&chapterId=${encodeURIComponent(ch.mangafireChapterId || ch.id)}`)
                         : isKatana
                         ? await fetch(`/api/crawler/pages?source=mangakatana&url=${encodeURIComponent(ch.url)}`)
@@ -536,7 +568,13 @@ export default function AdminPanelPage() {
 
                 // Client-side fallback if serverless page fetch returned empty
                 if (pages.length === 0) {
-                    if (isMangaFire && (ch.mangafireChapterId || ch.id)) {
+                    if (isManhuaus && ch.url) {
+                        try {
+                            const html = await fetchClientHtmlFallback(ch.url);
+                            pages = parseManhuausPagesHtml(html);
+                            pagesSaver = pages;
+                        } catch (_) {}
+                    } else if (isMangaFire && (ch.mangafireChapterId || ch.id)) {
                         try {
                             pages = await fetchMangaFirePages(ch.mangafireChapterId || ch.id);
                             pagesSaver = pages;
@@ -551,13 +589,14 @@ export default function AdminPanelPage() {
                 }
 
                 if (pages.length > 0) {
-                    const prefix = isMangaFire ? 'mf' : isKatana ? 'mk' : 'md';
+                    const prefix = isManhuaus ? 'mu' : isMangaFire ? 'mf' : isKatana ? 'mk' : 'md';
                     finalChapters.push({
                         id: `${targetMangaId}-${prefix}-${ch.id || i}`,
                         mangaId: targetMangaId,
-                        mangadexChapterId: ch.mangadexChapterId || (!isKatana && !isMangaFire ? ch.id : null),
-                        mangakatanaChapterUrl: ch.url || null,
+                        mangadexChapterId: ch.mangadexChapterId || (!isKatana && !isMangaFire && !isManhuaus ? ch.id : null),
+                        mangakatanaChapterUrl: isKatana ? (ch.url || null) : null,
                         mangafireChapterId: ch.mangafireChapterId || (isMangaFire ? ch.id : null),
+                        manhuausChapterUrl: isManhuaus ? (ch.url || null) : null,
                         title: ch.title,
                         number: typeof ch.number === 'number' && !isNaN(ch.number) ? ch.number : (i + 1),
                         pages,
@@ -792,7 +831,7 @@ export default function AdminPanelPage() {
                         2. Add Single Chapter
                     </button>
                     <button onClick={() => setActiveTab('crawler')} className={`py-3 px-5 border-b-2 whitespace-nowrap ${activeTab === 'crawler' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
-                        3. MangaDex, MangaKatana & MangaFire Crawler
+                        3. MangaDex, MangaKatana, MangaFire & ManhuaUS Crawler
                     </button>
                     <button onClick={() => setActiveTab('analyticsAds')} className={`py-3 px-5 border-b-2 whitespace-nowrap ${activeTab === 'analyticsAds' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
                         4. Analytics & Ad Placements
@@ -1083,7 +1122,7 @@ export default function AdminPanelPage() {
                         <div className="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
                             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#1f2337] pb-4">
                                 <div>
-                                    <h3 className="text-base font-black text-white">MangaDex.org, MangaKatana.com & MangaFire Live Crawler</h3>
+                                    <h3 className="text-base font-black text-white">MangaDex, MangaKatana, MangaFire & ManhuaUS.club Live Crawler</h3>
                                     <p className="text-xs text-slate-400">Search any series, load its full chapter list, and select all or particular chapters to import.</p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
@@ -1096,6 +1135,9 @@ export default function AdminPanelPage() {
                                     </button>
                                     <button type="button" onClick={() => setCrawlerSource('mangafire')} className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition ${crawlerSource === 'mangafire' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/30' : 'bg-[#1a1d30] text-slate-300 border border-[#2b3052]'}`}>
                                         🔥 MangaFire
+                                    </button>
+                                    <button type="button" onClick={() => setCrawlerSource('manhuaus')} className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition ${crawlerSource === 'manhuaus' ? 'bg-pink-600 text-white shadow-lg shadow-pink-600/30' : 'bg-[#1a1d30] text-slate-300 border border-[#2b3052]'}`}>
+                                        🐉 ManhuaUS.club
                                     </button>
                                 </div>
                             </div>
@@ -1118,13 +1160,18 @@ export default function AdminPanelPage() {
                                 <button type="button" onClick={() => handleScan('One Piece', 'mangafire')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-orange-600/30 text-orange-300 border border-orange-500/30 text-[11px] font-bold transition">
                                     One Piece (MangaFire)
                                 </button>
+                                <button type="button" onClick={() => handleScan('', 'manhuaus')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-pink-600/30 text-pink-300 border border-pink-500/30 text-[11px] font-bold transition">
+                                    Latest on ManhuaUS.club
+                                </button>
                             </div>
 
                             {/* Search Bar (No Custom Chapter Count Input!) */}
                             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                                 <div className="md:col-span-8">
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        {crawlerSource === 'mangakatana'
+                                        {crawlerSource === 'manhuaus'
+                                            ? 'Search ManhuaUS.club Title or Direct Series URL'
+                                            : crawlerSource === 'mangakatana'
                                             ? 'Search MangaKatana Title or Series URL'
                                             : crawlerSource === 'mangafire'
                                             ? 'Search MangaFire Title or Series ID'
@@ -1136,7 +1183,9 @@ export default function AdminPanelPage() {
                                         onChange={e => setSearchQuery(e.target.value)}
                                         onKeyDown={e => e.key === 'Enter' && handleScan()}
                                         placeholder={
-                                            crawlerSource === 'mangakatana'
+                                            crawlerSource === 'manhuaus'
+                                                ? 'e.g. Magic Emperor, Martial Peak, or https://manhuaus.club/manga/...'
+                                                : crawlerSource === 'mangakatana'
                                                 ? 'e.g. Naruto, Solo Leveling, or mangakatana.com/manga/...'
                                                 : crawlerSource === 'mangafire'
                                                 ? 'e.g. One Piece, Dandadan, or MangaFire series ID...'
@@ -1150,7 +1199,7 @@ export default function AdminPanelPage() {
                                     <select
                                         value={crawlerLang}
                                         onChange={e => setCrawlerLang(e.target.value)}
-                                        disabled={crawlerSource === 'mangakatana'}
+                                        disabled={crawlerSource === 'mangakatana' || crawlerSource === 'manhuaus'}
                                         className="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3 py-2.5 text-xs sm:text-sm text-white disabled:opacity-50"
                                     >
                                         <option value="en">English (EN)</option>
@@ -1167,7 +1216,9 @@ export default function AdminPanelPage() {
                                         {isScanning
                                             ? 'Searching...'
                                             : `Search ${
-                                                  crawlerSource === 'mangakatana'
+                                                  crawlerSource === 'manhuaus'
+                                                      ? 'ManhuaUS'
+                                                      : crawlerSource === 'mangakatana'
                                                       ? 'Katana'
                                                       : crawlerSource === 'mangafire'
                                                       ? 'MangaFire'
@@ -1189,6 +1240,7 @@ export default function AdminPanelPage() {
                                     {!selectedMangaToCrawl ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1">
                                             {scannedResults.map((item, idx) => {
+                                                const isManhuausItem = item.sourceHost === 'manhuaus.club' || !!item.manhuausId;
                                                 const isKatanaItem = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
                                                 const isMangaFireItem = item.sourceHost === 'mangafire' || !!item.mangafireId;
                                                 return (
@@ -1197,13 +1249,15 @@ export default function AdminPanelPage() {
                                                             <img src={item.cover} alt="" referrerPolicy="no-referrer" className="w-20 h-28 object-cover rounded-xl shrink-0 border border-white/10" />
                                                             <div className="min-w-0 flex-1 space-y-1">
                                                                 <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border inline-block ${
-                                                                    isMangaFireItem
+                                                                    isManhuausItem
+                                                                        ? 'bg-pink-500/20 text-pink-300 border-pink-500/30'
+                                                                        : isMangaFireItem
                                                                         ? 'bg-orange-500/20 text-orange-300 border-orange-500/30'
                                                                         : isKatanaItem
                                                                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                                                                         : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
                                                                 }`}>
-                                                                    {isMangaFireItem ? 'MangaFire' : isKatanaItem ? 'MangaKatana' : 'MangaDex.org'}
+                                                                    {isManhuausItem ? 'ManhuaUS.club' : isMangaFireItem ? 'MangaFire' : isKatanaItem ? 'MangaKatana' : 'MangaDex.org'}
                                                                 </span>
                                                                 <h4 className="text-xs font-black text-white line-clamp-2">{item.title}</h4>
                                                                 <p className="text-[11px] text-purple-300 truncate">{item.author}</p>

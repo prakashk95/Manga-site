@@ -32,7 +32,7 @@ export async function GET() {
     try {
         dynamicEntries = await getCachedQuery('seo_sitemap_xml', 3600000, async () => {
             const db = await getDb();
-            const mangaRes = await db.execute('SELECT id, mangadexId, mangakatanaId, mangafireId, title, updatedAt FROM mangas ORDER BY updatedAt DESC');
+            const mangaRes = await db.execute('SELECT * FROM mangas ORDER BY updatedAt DESC');
             const chRes = await db.execute('SELECT id, mangaId, title, number, createdAt FROM chapters ORDER BY number DESC');
 
             const mangas = mangaRes.rows || [];

@@ -23,7 +23,7 @@ try {
 
   seoCatalog = await getCachedQuery('seo_ssr_catalog_links', 300000, async () => {
     const db = await getDb();
-    const rows = await db.execute('SELECT id, mangadexId, mangakatanaId, mangafireId, title, synopsis FROM mangas ORDER BY updatedAt DESC LIMIT 100');
+    const rows = await db.execute('SELECT * FROM mangas ORDER BY updatedAt DESC LIMIT 100');
     return (rows.rows || []).map(m => ({
       id: m.id,
       title: m.title,

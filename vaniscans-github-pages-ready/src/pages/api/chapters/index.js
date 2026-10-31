@@ -12,14 +12,15 @@ export async function POST({ request }) {
 
         await db.execute({
             sql: `INSERT INTO chapters (
-                id, mangaId, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId,
+                id, mangaId, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId, manhuausChapterUrl,
                 title, number, pages, pagesSaver, atHomeUpdatedAt, createdAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 mangaId = excluded.mangaId,
                 mangadexChapterId = excluded.mangadexChapterId,
                 mangakatanaChapterUrl = excluded.mangakatanaChapterUrl,
                 mangafireChapterId = excluded.mangafireChapterId,
+                manhuausChapterUrl = excluded.manhuausChapterUrl,
                 title = excluded.title,
                 number = excluded.number,
                 pages = excluded.pages,
@@ -32,6 +33,7 @@ export async function POST({ request }) {
                 chapter.mangadexChapterId || null,
                 chapter.mangakatanaChapterUrl || null,
                 chapter.mangafireChapterId || null,
+                chapter.manhuausChapterUrl || null,
                 chapter.title || `Chapter ${chapter.number || 1}`,
                 Number(chapter.number) || 1,
                 pagesJson,

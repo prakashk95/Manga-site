@@ -20,6 +20,7 @@ export async function GET({ params }) {
                     mangadexChapterId: r.mangadexChapterId || null,
                     mangakatanaChapterUrl: r.mangakatanaChapterUrl || null,
                     mangafireChapterId: r.mangafireChapterId || null,
+                    manhuausChapterUrl: r.manhuausChapterUrl || null,
                     title: r.title || `Chapter ${r.number || 1}`,
                     number: Number(r.number) || 1,
                     pages: Array.isArray(pages) ? pages : [],

@@ -9,7 +9,7 @@ import {
     deleteAndSyncComment,
     saveLocalChaptersBulk
 } from '@/lib/clientStorage';
-import { parseMangaKatanaPagesHtml, fetchMangaFirePages } from '@/lib/crawler';
+import { parseMangaKatanaPagesHtml, parseManhuausPagesHtml, fetchMangaFirePages } from '@/lib/crawler';
 
 function AdSlotBanner({ slot }) {
     if (!slot || !slot.enabled) return null;
@@ -159,7 +159,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 }
                 const found = list.find(m => {
                     const mSlug = (m.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-                    const shortHash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.id || '').replace(/^manga-(md|mk|mf)-/, '').slice(0, 8).toLowerCase();
+                    const shortHash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.manhuausId || m.id || '').replace(/^manga-(md|mk|mf|mu)-/, '').slice(0, 8).toLowerCase();
                     const fullSlug = shortHash ? `${mSlug}-${shortHash}` : mSlug;
                     return fullSlug === slug.toLowerCase() || m.id.toLowerCase() === slug.toLowerCase();
                 });
@@ -212,6 +212,32 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 let freshPages = json.pages || [];
                 if (freshPages.length === 0) {
                     freshPages = await fetchMangaFirePages(chapterObj.mangafireChapterId);
+                }
+                if (freshPages.length > 0) {
+                    chapterObj.pages = freshPages;
+                    chapterObj.pagesSaver = freshPages;
+                    await saveLocalChaptersBulk([chapterObj]);
+                    await fetch('/api/chapters', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(chapterObj)
+                    });
+                }
+            } catch (_) {}
+        } else if (needsRefresh && (chapterObj.manhuausChapterUrl || (chapterObj.url && chapterObj.url.includes('manhuaus.club')))) {
+            const rawMuUrl = chapterObj.manhuausChapterUrl || chapterObj.url;
+            const muUrl = rawMuUrl.startsWith('http') ? rawMuUrl : `https://manhuaus.club${rawMuUrl.startsWith('/') ? '' : '/'}${rawMuUrl}`;
+            try {
+                let freshPages = [];
+                const proxyRes = await fetch(`/api/proxy/img?mode=html&source=manhuaus&url=${encodeURIComponent(muUrl)}`, { cache: 'no-store' });
+                if (proxyRes.ok) {
+                    const html = await proxyRes.text();
+                    freshPages = parseManhuausPagesHtml(html);
+                }
+                if (freshPages.length === 0) {
+                    const res = await fetch(`/api/crawler/pages?source=manhuaus&url=${encodeURIComponent(muUrl)}`, { cache: 'no-store' });
+                    const json = await res.json();
+                    freshPages = json.pages || [];
                 }
                 if (freshPages.length > 0) {
                     chapterObj.pages = freshPages;
@@ -322,7 +348,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
 
     const pages = currentChapter.pages || [];
     const ads = monetization?.ads || {};
-    const rawChUrl = currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
+    const rawChUrl = currentChapter.manhuausChapterUrl || currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
     const activeChapterUrl = rawChUrl.startsWith('http') 
         ? rawChUrl 
         : (rawChUrl ? `https://mangakatana.com${rawChUrl.startsWith('/') ? '' : '/'}${rawChUrl}` : '');
@@ -459,6 +485,27 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                     </div>
                 </div>
             </section>
+
+            {/* Footer with Legal Hyperlinks */}
+            <footer className="bg-[#0a0b10] border-t border-[#1a1c2b] py-10 mt-auto text-xs text-slate-500 select-text">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white font-bold">⚡</div>
+                        <div>
+                            <div className="font-black text-slate-300 text-sm">VANISCANS</div>
+                            <div>High performance manhwa & webtoon reading hub.</div>
+                        </div>
+                    </div>
+                    <nav aria-label="Footer Legal Navigation" className="flex flex-wrap justify-center gap-6 text-slate-300 font-medium">
+                        <a href="/about" className="hover:text-purple-400 transition">About Us</a>
+                        <a href="/privacy" className="hover:text-purple-400 transition">Privacy Policy</a>
+                        <a href="/terms" className="hover:text-purple-400 transition">Terms of Service</a>
+                        <a href="/dmca" className="hover:text-purple-400 transition">DMCA</a>
+                        <a href="/contact" className="hover:text-purple-400 transition">Contact Us</a>
+                    </nav>
+                    <div>&copy; 2026 VaniScans. All rights reserved.</div>
+                </div>
+            </footer>
         </div>
     );
 }

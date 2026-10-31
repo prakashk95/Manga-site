@@ -1,5 +1,6 @@
 import {
     parseMangaKatanaChaptersHtml,
+    fetchManhuausChaptersWithAjax,
     fetchHtmlWithFallback,
     fetchMangaFireChapters
 } from '@/lib/crawler';
@@ -65,9 +66,21 @@ async function fetchMangaDexFeedChapters(mangaId, lang) {
 
 export async function GET({ request }) {
     const url = new URL(request.url);
-    const source = url.searchParams.get('source') || 'mangadex';
+    const rawUrlParam = (url.searchParams.get('url') || url.searchParams.get('slug') || '').trim();
+    const rawSource = url.searchParams.get('source') || 'mangadex';
+    const source = rawUrlParam.includes('manhuaus.club') ? 'manhuaus' : rawSource;
 
-    if (source === 'mangafire') {
+    if (source === 'manhuaus') {
+        const targetUrl = rawUrlParam.startsWith('http')
+            ? rawUrlParam
+            : `https://manhuaus.club/manga/${rawUrlParam.replace(/^\/+|\/+$/g, '')}/`;
+        try {
+            const chapters = await fetchManhuausChaptersWithAjax(targetUrl);
+            return Response.json({ result: 'ok', data: chapters });
+        } catch (err) {
+            return Response.json({ error: err.message, data: [] }, { status: 500 });
+        }
+    } else if (source === 'mangafire') {
         const mangaId = (url.searchParams.get('mangaId') || '').trim();
         const lang = url.searchParams.get('lang') || 'en';
         if (!mangaId) return Response.json({ error: 'Missing mangaId', data: [] }, { status: 400 });
@@ -78,8 +91,7 @@ export async function GET({ request }) {
             return Response.json({ error: err.message, data: [] }, { status: 500 });
         }
     } else if (source === 'mangakatana') {
-        const rawUrl = (url.searchParams.get('url') || url.searchParams.get('slug') || '').trim();
-        const targetUrl = rawUrl.startsWith('http') ? rawUrl : `https://mangakatana.com/manga/${rawUrl.replace(/^\/+/, '')}`;
+        const targetUrl = rawUrlParam.startsWith('http') ? rawUrlParam : `https://mangakatana.com/manga/${rawUrlParam.replace(/^\/+/, '')}`;
         try {
             const { html } = await fetchHtmlWithFallback(targetUrl);
             const chapters = parseMangaKatanaChaptersHtml(html);

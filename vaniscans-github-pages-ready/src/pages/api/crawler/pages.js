@@ -1,5 +1,6 @@
 import {
     parseMangaKatanaPagesHtml,
+    parseManhuausPagesHtml,
     fetchHtmlWithFallback,
     fetchMangaFirePages
 } from '@/lib/crawler';
@@ -12,9 +13,22 @@ const NO_STORE_HEADERS = {
 
 export async function GET({ request }) {
     const url = new URL(request.url);
-    const source = url.searchParams.get('source') || 'mangadex';
+    const targetUrlParam = (url.searchParams.get('url') || '').trim();
+    const rawSource = url.searchParams.get('source') || 'mangadex';
+    const source = targetUrlParam.includes('manhuaus.club') ? 'manhuaus' : rawSource;
 
-    if (source === 'mangafire') {
+    if (source === 'manhuaus') {
+        if (!targetUrlParam.startsWith('http')) {
+            return Response.json({ error: 'Valid ManhuaUS chapter url required' }, { status: 400, headers: NO_STORE_HEADERS });
+        }
+        try {
+            const { html } = await fetchHtmlWithFallback(targetUrlParam);
+            const pages = parseManhuausPagesHtml(html);
+            return Response.json({ result: 'ok', pages, pagesSaver: pages }, { headers: NO_STORE_HEADERS });
+        } catch (err) {
+            return Response.json({ error: err.message, pages: [], pagesSaver: [] }, { status: 500, headers: NO_STORE_HEADERS });
+        }
+    } else if (source === 'mangafire') {
         const chapterId = (url.searchParams.get('chapterId') || '').trim();
         if (!chapterId) {
             return Response.json({ error: 'Missing chapterId' }, { status: 400, headers: NO_STORE_HEADERS });
@@ -26,12 +40,11 @@ export async function GET({ request }) {
             return Response.json({ error: err.message, pages: [], pagesSaver: [] }, { status: 500, headers: NO_STORE_HEADERS });
         }
     } else if (source === 'mangakatana') {
-        const targetUrl = (url.searchParams.get('url') || '').trim();
-        if (!targetUrl.startsWith('http')) {
+        if (!targetUrlParam.startsWith('http')) {
             return Response.json({ error: 'Valid chapter url required' }, { status: 400, headers: NO_STORE_HEADERS });
         }
         try {
-            const { html } = await fetchHtmlWithFallback(targetUrl);
+            const { html } = await fetchHtmlWithFallback(targetUrlParam);
             const pages = parseMangaKatanaPagesHtml(html);
             return Response.json({ result: 'ok', pages }, { headers: NO_STORE_HEADERS });
         } catch (err) {
