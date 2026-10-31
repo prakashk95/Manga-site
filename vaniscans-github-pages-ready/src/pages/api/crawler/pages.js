@@ -1,6 +1,6 @@
 import {
     parseMangaKatanaPagesHtml,
-    parseManhuausPagesHtml,
+    
     fetchHtmlWithFallback,
     fetchMangaFirePages
 } from '@/lib/crawler';

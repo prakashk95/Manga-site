@@ -1,6 +1,6 @@
 import {
     parseMangaKatanaHtmlSearch,
-    parseManhuausHtmlSearch,
+    
     fetchHtmlWithFallback,
     formatMangaDexSearchData,
     fetchMangaFireSearch

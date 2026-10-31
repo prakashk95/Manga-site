@@ -1,6 +1,6 @@
 import {
     parseMangaKatanaChaptersHtml,
-    fetchManhuausChaptersWithAjax,
+    
     fetchHtmlWithFallback,
     fetchMangaFireChapters
 } from '@/lib/crawler';
