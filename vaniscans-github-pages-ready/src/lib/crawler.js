@@ -477,13 +477,13 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
 
     const origin = resolveManhuausOrigin(seriesUrl);
 
-    // Bulletproof universal chapter scanner
+    // Universal anchor scanner
     const aRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
 
     while ((match = aRegex.exec(html)) !== null) {
         const rawHref = match[1].trim();
-        if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
+        if (!rawHref || rawHref.startsWith('#' ) || rawHref.startsWith('javascript:')) continue;
 
         const cleanHref = rawHref.split('#')[0].trim();
         if (!cleanHref) continue;
@@ -657,8 +657,7 @@ export async function fetchHtmlWithFallback(targetUrl) {
     const relays = [
         { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, json: true },
         { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, json: false },
-        { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, json: false },
-        { url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, json: false }
+        { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, json: false }
     ];
 
     for (const relay of relays) {
