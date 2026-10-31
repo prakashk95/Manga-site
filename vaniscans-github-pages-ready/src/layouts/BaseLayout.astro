@@ -1,0 +1,78 @@
+---
+import '@/styles/globals.css';
+import { getDb, getCachedQuery, getMangaSlug } from '@/lib/db';
+import { mergeMonetization } from '@/lib/monetization';
+
+const {
+  title = 'VaniScans — Read Manhwa, Manga & Webtoons Online',
+  description = 'Read high-quality manga, manhwa, and webtoons online free on VaniScans (vaniscans.online). Fast updates, vertical webtoon scroll, and zero popups.',
+  ogImage = '',
+  noindex = false,
+} = Astro.props;
+
+let monetization = mergeMonetization(null);
+let seoCatalog = [];
+
+try {
+  const rawMon = await getCachedQuery('monetization_settings', 120000, async () => {
+    const db = await getDb();
+    const row = await db.execute('SELECT settings FROM monetization WHERE id = 1');
+    return row.rows?.[0]?.settings ? JSON.parse(row.rows[0].settings) : {};
+  });
+  monetization = mergeMonetization(rawMon);
+
+  seoCatalog = await getCachedQuery('seo_ssr_catalog_links', 300000, async () => {
+    const db = await getDb();
+    const rows = await db.execute('SELECT id, mangadexId, mangakatanaId, mangafireId, title, synopsis FROM mangas ORDER BY updatedAt DESC LIMIT 100');
+    return (rows.rows || []).map(m => ({
+      id: m.id,
+      title: m.title,
+      synopsis: m.synopsis || '',
+      slug: getMangaSlug(m),
+    }));
+  });
+} catch (_) {}
+
+const gaId = monetization.gaEnabled && monetization.gaMeasurementId ? monetization.gaMeasurementId.trim() : '';
+const customHeadHtml = (monetization.customHeadCode || '').trim();
+---
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    {ogImage && <meta property="og:image" content={ogImage} />}
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    {gaId && (
+      <>
+        <script async src={`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(gaId)}`}></script>
+        <script is:inline set:html={`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${gaId.replace(/'/g, "\\'")}');`} />
+      </>
+    )}
+    {customHeadHtml && <Fragment set:html={customHeadHtml} />}
+  </head>
+  <body class="min-h-screen flex flex-col bg-[#0b0c13] text-slate-100 selection:bg-purple-600 selection:text-white">
+    <slot />
+    {seoCatalog.length > 0 && (
+      <nav aria-label="VaniScans Manga Catalog Directory" class="sr-only">
+        <h2>VaniScans Manga, Manhwa & Webtoon Series Directory</h2>
+        <ul>
+          {seoCatalog.map(item => (
+            <li>
+              <a href={`/comics/${item.slug}`}>Read {item.title} Manga Online - VaniScans</a>
+              <p>{item.synopsis}</p>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    )}
+  </body>
+</html>

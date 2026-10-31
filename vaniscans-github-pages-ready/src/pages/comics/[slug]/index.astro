@@ -1,0 +1,119 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import { getServerMangaBySlug } from '@/lib/db';
+
+const { slug } = Astro.params;
+const { manga, chapters } = await getServerMangaBySlug(slug);
+
+if (!manga) {
+  Astro.response.status = 404;
+}
+
+const seoTitle = manga?.metaTitle?.trim() || (manga ? `Read ${manga.title} - VaniScans` : 'Series Not Found - VaniScans');
+const seoDesc = manga?.metaDescription?.trim() || (manga ? `Read ${manga.title} / ${manga.synopsis}` : 'Manga reading hub.');
+
+const ascChapters = [...chapters].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+const firstCh = ascChapters[0];
+const latestCh = ascChapters[ascChapters.length - 1];
+
+const getChapterSlug = (ch, index = 0) => {
+  if (!ch) return '1';
+  if (typeof ch.number === 'number' && !isNaN(ch.number)) return String(ch.number);
+  const match = (ch.title || '').match(/(\d+(\.\d+)?)/);
+  return match ? match[1] : String(index + 1);
+};
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=30, s-maxage=120, stale-while-revalidate=600');
+---
+<BaseLayout title={seoTitle} description={seoDesc} ogImage={manga?.cover || ''}>
+  {!manga ? (
+    <div class="min-h-screen flex flex-col items-center justify-center bg-[#0b0c13] text-slate-300 space-y-4">
+      <h1 class="text-xl font-bold">Series not found</h1>
+      <a href="/" class="px-4 py-2 bg-purple-600 text-white rounded-xl text-xs font-bold">Back to Home</a>
+    </div>
+  ) : (
+    <div class="min-h-screen flex flex-col bg-[#0b0c13] text-slate-100 pb-20">
+      <header class="sticky top-0 z-40 bg-[#0c0d14]/90 backdrop-blur-md border-b border-[#1f2337]">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <a href="/" class="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white">← Back to Catalog</a>
+        </div>
+      </header>
+
+      <div class="relative w-full h-80 sm:h-96 bg-cover bg-center" style={`background-image: url('${manga.banner || manga.cover}')`}>
+        <div class="absolute inset-0 banner-gradient backdrop-blur-sm"></div>
+      </div>
+
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-20">
+        <div class="flex flex-col lg:flex-row gap-8 items-start">
+          <div class="w-full lg:w-72 shrink-0 bg-[#121422] border border-[#20243b] rounded-2xl p-5 shadow-2xl">
+            <img src={manga.cover} alt={manga.title} referrerpolicy="no-referrer" class="w-full aspect-[3/4] object-cover rounded-xl shadow-lg border border-white/5 mb-4" />
+            <div class="space-y-2.5">
+              {chapters.length > 0 && (
+                <div class="grid grid-cols-2 gap-2">
+                  <a href={`/comics/${slug}/chapter/${getChapterSlug(firstCh, 0)}`} class="py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg flex items-center justify-center gap-1.5">▶ First Ch</a>
+                  <a href={`/comics/${slug}/chapter/${getChapterSlug(latestCh, ascChapters.length - 1)}`} class="py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider bg-[#181b2e] text-purple-300 border border-purple-500/30 flex items-center justify-center gap-1.5">⚡ Latest Ch</a>
+                </div>
+              )}
+              <div class="pt-4 border-t border-[#1d2136] space-y-2 text-xs text-slate-400">
+                <div class="flex justify-between"><span>Status:</span> <span class="font-semibold text-emerald-400">{manga.status}</span></div>
+                <div class="flex justify-between"><span>Author:</span> <span class="font-semibold text-slate-200">{manga.author}</span></div>
+                <div class="flex justify-between"><span>Rating:</span> <span class="font-semibold text-amber-400">⭐ {manga.rating}</span></div>
+                <div class="flex justify-between"><span>Chapters:</span> <span class="font-semibold text-purple-400">{chapters.length}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex-grow w-full space-y-6">
+            <div class="bg-[#121422] border border-[#20243b] rounded-2xl p-6 sm:p-8 space-y-3">
+              <div class="flex flex-wrap gap-2">
+                {(manga.genres || ['Action']).map(g => (
+                  <span class="px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-purple-600/20 text-purple-300 border border-purple-500/30">{g}</span>
+                ))}
+              </div>
+              <h1 class="text-2xl sm:text-4xl font-black text-white">{manga.title}</h1>
+              <p class="text-sm leading-relaxed text-slate-400">{manga.synopsis}</p>
+            </div>
+
+            <div class="bg-[#121422] border border-[#20243b] rounded-2xl p-6 sm:p-8 space-y-4">
+              <h2 class="text-lg font-bold text-white">CHAPTERS ({chapters.length})</h2>
+              <div class="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                {chapters.map((ch, idx) => (
+                  <a href={`/comics/${slug}/chapter/${getChapterSlug(ch, idx)}`} class="flex items-center justify-between p-3.5 bg-[#16192a] hover:bg-purple-600/25 border border-[#20243b] rounded-xl transition group">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-lg bg-[#1f233a] group-hover:bg-purple-600 text-purple-400 group-hover:text-white flex items-center justify-center text-xs font-bold transition">📄</div>
+                      <div>
+                        <h4 class="text-sm font-semibold text-white group-hover:text-purple-300 transition">{ch.title}</h4>
+                        <span class="text-[11px] text-slate-500">{ch.pages?.length || 0} pages</span>
+                      </div>
+                    </div>
+                    <span class="text-xs font-bold px-3 py-1 bg-[#1f233a] group-hover:bg-purple-600 text-slate-300 group-hover:text-white rounded-xl transition">Read</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="bg-[#0a0b10] border-t border-[#1a1c2b] py-10 mt-16 text-xs text-slate-500">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white font-bold">⚡</div>
+            <div>
+              <div class="font-black text-slate-300 text-sm">VANISCANS</div>
+              <div>High performance manhwa & webtoon reading hub.</div>
+            </div>
+          </div>
+          <div class="flex flex-wrap justify-center gap-6 text-slate-300 font-medium">
+            <a href="/about" class="hover:text-purple-400 transition">About Us</a>
+            <a href="/privacy" class="hover:text-purple-400 transition">Privacy Policy</a>
+            <a href="/terms" class="hover:text-purple-400 transition">Terms of Service</a>
+            <a href="/dmca" class="hover:text-purple-400 transition">DMCA</a>
+            <a href="/contact" class="hover:text-purple-400 transition">Contact Us</a>
+          </div>
+          <div>&copy; 2026 VaniScans. All rights reserved.</div>
+        </div>
+      </footer>
+    </div>
+  )}
+</BaseLayout>

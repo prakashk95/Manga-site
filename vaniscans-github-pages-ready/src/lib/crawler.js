@@ -289,7 +289,7 @@ export async function fetchHtmlWithFallback(targetUrl) {
 
 
 export const MANGAFIRE_API_BASE =
-    process.env.NEXT_PUBLIC_MANGAFIRE_API_URL ||
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MANGAFIRE_API_URL) || process.env.MANGAFIRE_API_URL ||
     process.env.MANGAFIRE_API_URL ||
     'http://localhost:3001/api';
 

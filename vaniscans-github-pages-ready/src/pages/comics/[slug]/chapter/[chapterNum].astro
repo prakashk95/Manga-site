@@ -1,0 +1,28 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import ChapterReader from '@/components/ChapterReader.jsx';
+import { getServerMangaBySlug } from '@/lib/db';
+
+const { slug, chapterNum } = Astro.params;
+const { manga, chapters } = await getServerMangaBySlug(slug);
+
+const sortedAsc = [...chapters].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+const initialChapter = sortedAsc.find((ch, idx) => {
+  const chSlug = typeof ch.number === 'number' ? String(ch.number) : String(idx + 1);
+  return chSlug.toLowerCase() === (chapterNum || '').toLowerCase() || ch.id.toLowerCase() === (chapterNum || '').toLowerCase();
+}) || sortedAsc[0] || null;
+
+const title = manga && initialChapter
+  ? `Read ${manga.title} ${initialChapter.title} - VaniScans`
+  : 'Read Chapter - VaniScans';
+---
+<BaseLayout title={title}>
+  <ChapterReader
+    client:load
+    slug={slug}
+    chapterNumParam={chapterNum}
+    initialManga={manga}
+    initialChapters={sortedAsc}
+    initialChapter={initialChapter}
+  />
+</BaseLayout>

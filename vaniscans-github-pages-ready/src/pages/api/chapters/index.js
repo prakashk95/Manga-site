@@ -1,0 +1,49 @@
+import { getDb, invalidateDbCache } from '@/lib/db';
+
+export async function POST({ request }) {
+    try {
+        const db = await getDb();
+        const chapter = await request.json();
+        if (!chapter || !chapter.id || !chapter.mangaId) {
+            return Response.json({ error: 'Invalid chapter data' }, { status: 400 });
+        }
+        const pagesJson = JSON.stringify(Array.isArray(chapter.pages) ? chapter.pages : []);
+        const pagesSaverJson = JSON.stringify(Array.isArray(chapter.pagesSaver) ? chapter.pagesSaver : (chapter.pages || []));
+
+        await db.execute({
+            sql: `INSERT INTO chapters (
+                id, mangaId, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId,
+                title, number, pages, pagesSaver, atHomeUpdatedAt, createdAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                mangaId = excluded.mangaId,
+                mangadexChapterId = excluded.mangadexChapterId,
+                mangakatanaChapterUrl = excluded.mangakatanaChapterUrl,
+                mangafireChapterId = excluded.mangafireChapterId,
+                title = excluded.title,
+                number = excluded.number,
+                pages = excluded.pages,
+                pagesSaver = excluded.pagesSaver,
+                atHomeUpdatedAt = excluded.atHomeUpdatedAt,
+                createdAt = excluded.createdAt`,
+            args: [
+                chapter.id,
+                chapter.mangaId,
+                chapter.mangadexChapterId || null,
+                chapter.mangakatanaChapterUrl || null,
+                chapter.mangafireChapterId || null,
+                chapter.title || `Chapter ${chapter.number || 1}`,
+                Number(chapter.number) || 1,
+                pagesJson,
+                pagesSaverJson,
+                Number(chapter.atHomeUpdatedAt) || Date.now(),
+                Number(chapter.createdAt) || Date.now()
+            ]
+        });
+
+        invalidateDbCache();
+        return Response.json(chapter);
+    } catch (err) {
+        return Response.json({ error: err.message }, { status: 500 });
+    }
+}

@@ -1,0 +1,11 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import CatalogInteractive from '@/components/CatalogInteractive.jsx';
+import { getServerCatalogWithChapters } from '@/lib/db';
+
+const initialMangas = await getServerCatalogWithChapters();
+Astro.response.headers.set('Cache-Control', 'public, max-age=15, s-maxage=60, stale-while-revalidate=300');
+---
+<BaseLayout>
+  <CatalogInteractive client:load initialMangas={initialMangas} />
+</BaseLayout>

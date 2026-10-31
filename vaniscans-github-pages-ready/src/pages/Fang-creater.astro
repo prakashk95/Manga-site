@@ -1,0 +1,8 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import AdminStudio from '@/components/AdminStudio.jsx';
+---
+<BaseLayout title="Admin Studio - VaniScans" noindex={true}>
+  <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <AdminStudio client:only="react" />
+</BaseLayout>
