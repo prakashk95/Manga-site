@@ -316,7 +316,7 @@ export function parseMangaKatanaPagesHtml(html) {
 }
 
 // ============================================================================
-// MANHUAUS.CLUB & MANHUAUS.COM SCRAPER FUNCTIONS (V5 FIXED)
+// MANHUAUS.CLUB & MANHUAUS.COM SCRAPER FUNCTIONS (V6 ROBUST ANCHOR SCANNER)
 // ============================================================================
 
 function resolveManhuausOrigin(urlStr = '') {
@@ -522,86 +522,65 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
         });
     }
 
-    // 2. Redesigned ManhuaUS.club / Arena-style chapter list container (V5 Fixed: matches concatenated tags like 1Chapter 1)
-    if (rawChapters.length === 0) {
-        let chapterSection = html;
-        const startMatch =
-            chapterSection.match(/First\s+chapter[\s\S]{0,300}?Latest\s+chapter/i) ||
-            chapterSection.match(/Chapters\s*<[^>]*>\s*\d+/i) ||
-            chapterSection.match(/id=["'](?:chapters|chapterlist|manga-chapters-holder|chapter-list)["']/i);
+    // 2. V6 Robust Universal Anchor Scanner (scans ALL <a> tags on page for chapter numbers and valid sub-paths)
+    const aRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    while ((match = aRegex.exec(html)) !== null) {
+        const rawHref = match[1].trim();
+        if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
 
-        if (startMatch && typeof startMatch.index === 'number') {
-            chapterSection = chapterSection.slice(startMatch.index + startMatch[0].length);
+        const cleanHref = rawHref.split('#')[0].trim();
+        if (!cleanHref) continue;
+
+        const fullUrl = cleanHref.startsWith('http')
+            ? cleanHref
+            : `${origin}${cleanHref.startsWith('/') ? '' : '/'}${cleanHref}`;
+
+        // Skip pagination, main series overview page, and external links
+        if (
+            /\/manga\/page\/\d+/i.test(fullUrl) ||
+            /[?&](?:page|cpage|m_orderby)=/i.test(fullUrl) ||
+            (seriesSlug && new RegExp(`\\/manga\\/${seriesSlug}\\/?$`, 'i').test(fullUrl)) ||
+            /\/manga\/[^/?#]+\/?$/i.test(fullUrl) ||
+            !fullUrl.includes(new URL(origin).hostname)
+        ) {
+            continue;
         }
-        const endMatch = chapterSection.match(/No\s+chapters\s+match\s+your\s+search|Join\s+the\s+discussion|<footer/i);
-        if (endMatch && typeof endMatch.index === 'number' && endMatch.index > 50) {
-            chapterSection = chapterSection.slice(0, endMatch.index);
+
+        const text = stripHtmlTags(match[2]);
+        if (
+            /read\s+chapter\s+\d+\s+now/i.test(text) ||
+            /^(?:first\s+chapter|latest\s+chapter|read\s+now|read\s+first|read\s+last|details|continue\s+reading|comments|manga\s+discussion)$/i.test(text)
+        ) {
+            continue;
         }
 
-        const scanAnchors = (scopeHtml) => {
-            const aRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-            let am;
-            while ((am = aRegex.exec(scopeHtml)) !== null) {
-                const rawHref = am[1].trim();
-                if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
+        const cleanPath = fullUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
+        const lastSeg = cleanPath.split('/').pop() || '';
 
-                const cleanHref = rawHref.split('#')[0].trim();
-                if (!cleanHref) continue;
+        // Universal number extractor (matches "1Chapter 1", "Chapter 1", "ch.1", or slug endings like "chapter-1")
+        const numFromText =
+            text.match(/chapter\s*[-:#]?\s*(\d+(?:\.\d+)?)/i) ||
+            text.match(/episode\s*[-:#]?\s*(\d+(?:\.\d+)?)/i) ||
+            text.match(/(?:\b|^)(\d+(?:\.\d+)?)\s*chapter/i) ||
+            text.match(/^(\d+(?:\.\d+)?)$/);
 
-                const fullUrl = cleanHref.startsWith('http')
-                    ? cleanHref
-                    : `${origin}${cleanHref.startsWith('/') ? '' : '/'}${cleanHref}`;
+        const numFromSlug =
+            lastSeg.match(/chapter[-_]?(\d+(?:\.\d+)?)/i) ||
+            lastSeg.match(/^c(\d+(?:\.\d+)?)$/i);
 
-                if (
-                    /\/manga\/page\/\d+/i.test(fullUrl) ||
-                    /[?&](?:page|cpage|m_orderby)=/i.test(fullUrl) ||
-                    (seriesSlug && new RegExp(`\\/manga\\/${seriesSlug}\\/?$`, 'i').test(fullUrl)) ||
-                    /\/manga\/[^/?#]+\/?$/i.test(fullUrl)
-                ) {
-                    continue;
-                }
+        const numMatch = numFromText || numFromSlug;
+        if (!numMatch) continue;
 
-                const text = stripHtmlTags(am[2]);
-                if (
-                    /read\s+chapter\s+\d+\s+now/i.test(text) ||
-                    /^(?:first\s+chapter|latest\s+chapter|read\s+now|read\s+first|read\s+last|details|continue\s+reading)$/i.test(text)
-                ) {
-                    continue;
-                }
+        if (seenUrls.has(fullUrl)) continue;
+        seenUrls.add(fullUrl);
 
-                const cleanPath = fullUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
-                const lastSeg = cleanPath.split('/').pop() || '';
-
-                // V5 fix: No \b before chapter so "1Chapter 1" matches successfully
-                const numFromText =
-                    text.match(/chapter\s*[-:#]?\s*(\d+(?:\.\d+)?)/i) ||
-                    text.match(/episode\s*[-:#]?\s*(\d+(?:\.\d+)?)/i) ||
-                    text.match(/(?:\b|^)(\d+(?:\.\d+)?)\s*chapter/i);
-
-                const numFromSlug =
-                    lastSeg.match(/chapter[-_]?(\d+(?:\.\d+)?)/i) ||
-                    lastSeg.match(/^c(\d+(?:\.\d+)?)$/i);
-
-                const numMatch = numFromText || numFromSlug;
-                if (!numMatch) continue;
-
-                if (seenUrls.has(fullUrl)) continue;
-                seenUrls.add(fullUrl);
-
-                const parsedNum = parseFloat(numMatch[1].replace('-', '.'));
-                rawChapters.push({
-                    id: lastSeg || `ch-${rawChapters.length + 1}`,
-                    url: fullUrl,
-                    title: `Chapter ${parsedNum}`,
-                    parsedNum
-                });
-            }
-        };
-
-        scanAnchors(chapterSection);
-        if (rawChapters.length <= 1 && chapterSection !== html) {
-            scanAnchors(html);
-        }
+        const parsedNum = parseFloat(numMatch[1].replace('-', '.'));
+        rawChapters.push({
+            id: lastSeg || `ch-${rawChapters.length + 1}`,
+            url: fullUrl,
+            title: `Chapter ${parsedNum}`,
+            parsedNum
+        });
     }
 
     // 3. Embedded <script> JSON chapter list fallback
