@@ -1,6 +1,5 @@
 import {
     parseMangaKatanaHtmlSearch,
-    
     fetchHtmlWithFallback,
     formatMangaDexSearchData,
     fetchMangaFireSearch
@@ -12,19 +11,9 @@ const USER_AGENT = 'VaniScans/6.0 (+https://vaniscans.online)';
 export async function GET({ request }) {
     const url = new URL(request.url);
     const q = (url.searchParams.get('q') || '').trim();
-    const rawSource = url.searchParams.get('source') || 'mangadex';
+    const source = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
 
-    if (false) {
-        try {
-                targetUrl = q;
-            } else if (q) {
-            }
-            const { html, finalUrl } = await fetchHtmlWithFallback(targetUrl);
-            return Response.json({ result: 'ok', data: results });
-        } catch (err) {
-            return Response.json({ error: err.message, data: [] }, { status: 500 });
-        }
-    } else if (source === 'mangafire') {
+    if (source === 'mangafire') {
         try {
             const results = await fetchMangaFireSearch(q);
             return Response.json({ result: 'ok', data: results });
