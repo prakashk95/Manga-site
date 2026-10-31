@@ -61,49 +61,45 @@ function AdSlotBanner({ slot }) {
  * Stage 2: Falls back to `/api/proxy/img?p=${pageNum}&url=...` (with `no-store` & `Netlify-Vary: query`)
  */
 function MangaPageImage({ rawUrl, pageNum }) {
-    const [stage, setStage] = useState(0);
     const [loaded, setLoaded] = useState(false);
+    const [failed, setFailed] = useState(false);
 
     useEffect(() => {
-        setStage(0);
         setLoaded(false);
+        setFailed(false);
     }, [rawUrl]);
 
     if (!rawUrl) return null;
 
-    let currentSrc = rawUrl;
-    if (!rawUrl.startsWith('data:')) {
-        if (stage === 1) {
-            currentSrc = `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`;
-        } else if (stage >= 2) {
-            currentSrc = `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}`;
-        }
-    }
+    // Route directly through your server proxy to reliably bypass hotlink & referer blocks on the first try
+    const proxySrc = rawUrl.startsWith('data:') 
+        ? rawUrl 
+        : `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}`;
 
     return (
-        <div className="w-full max-w-[900px] mx-auto bg-[#0d0f1a] relative flex flex-col items-center justify-center">
-            {!loaded && (
+        <div className="w-full max-w-[900px] mx-auto bg-[#0d0f1a] relative flex flex-col items-center justify-center min-h-[300px]">
+            {!loaded && !failed && (
                 <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs w-full">
                     <div className="w-7 h-7 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
                     <span>Loading Page {pageNum}...</span>
                 </div>
             )}
-            <img
-                src={currentSrc}
-                alt={`Page ${pageNum}`}
-                loading={pageNum <= 3 ? "eager" : "lazy"}
-                decoding="async"
-                referrerPolicy="no-referrer"
-                onLoad={() => setLoaded(true)}
-                onError={() => {
-                    if (stage < 2 && !rawUrl.startsWith('data:')) {
-                        setStage(prev => prev + 1);
-                    } else {
-                        setLoaded(true);
-                    }
-                }}
-                className={`webtoon-img shadow-2xl block border-b border-black/40 transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0 max-h-0 overflow-hidden'}`}
-            />
+            {failed ? (
+                <div className="py-12 text-center text-rose-400 text-xs">
+                    Failed to load Page {pageNum}. <button onClick={() => setFailed(false)} className="underline font-bold ml-1">Retry</button>
+                </div>
+            ) : (
+                <img
+                    src={proxySrc}
+                    alt={`Page ${pageNum}`}
+                    loading={pageNum <= 3 ? "eager" : "lazy"}
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    onLoad={() => setLoaded(true)}
+                    onError={() => setFailed(true)}
+                    className={`webtoon-img shadow-2xl block border-b border-black/40 transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0 max-h-0 overflow-hidden'}`}
+                />
+            )}
         </div>
     );
 }
