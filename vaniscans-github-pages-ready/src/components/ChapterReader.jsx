@@ -61,20 +61,26 @@ function AdSlotBanner({ slot }) {
  * Stage 2: Falls back to `/api/proxy/img?p=${pageNum}&url=...` (with `no-store` & `Netlify-Vary: query`)
  */
 function MangaPageImage({ rawUrl, pageNum }) {
+    const [sourceIndex, setSourceIndex] = useState(0);
     const [loaded, setLoaded] = useState(false);
     const [failed, setFailed] = useState(false);
 
     useEffect(() => {
+        setSourceIndex(0);
         setLoaded(false);
         setFailed(false);
     }, [rawUrl]);
 
     if (!rawUrl) return null;
 
-    // Route directly through your server proxy to reliably bypass hotlink & referer blocks on the first try
-    const proxySrc = rawUrl.startsWith('data:') 
-        ? rawUrl 
-        : `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}`;
+    // Direct upstream + public CDN mirror fallbacks that never get blocked
+    const sources = [
+        rawUrl, 
+        `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`, 
+        `https://images.weserv.nl/?url=${encodeURIComponent(rawUrl)}`
+    ];
+
+    const currentSrc = sources[sourceIndex] || rawUrl;
 
     return (
         <div className="w-full max-w-[900px] mx-auto bg-[#0d0f1a] relative flex flex-col items-center justify-center min-h-[300px]">
@@ -86,17 +92,23 @@ function MangaPageImage({ rawUrl, pageNum }) {
             )}
             {failed ? (
                 <div className="py-12 text-center text-rose-400 text-xs">
-                    Failed to load Page {pageNum}. <button onClick={() => setFailed(false)} className="underline font-bold ml-1">Retry</button>
+                    Failed to load Page {pageNum}. <button onClick={() => { setSourceIndex(0); setFailed(false); }} className="underline font-bold ml-1">Retry</button>
                 </div>
             ) : (
                 <img
-                    src={proxySrc}
+                    src={currentSrc}
                     alt={`Page ${pageNum}`}
                     loading={pageNum <= 3 ? "eager" : "lazy"}
                     decoding="async"
                     referrerPolicy="no-referrer"
                     onLoad={() => setLoaded(true)}
-                    onError={() => setFailed(true)}
+                    onError={() => {
+                        if (sourceIndex < sources.length - 1) {
+                            setSourceIndex(prev => prev + 1); // Automatically switches mirrors on the fly!
+                        } else {
+                            setFailed(true);
+                        }
+                    }}
                     className={`webtoon-img shadow-2xl block border-b border-black/40 transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0 max-h-0 overflow-hidden'}`}
                 />
             )}
