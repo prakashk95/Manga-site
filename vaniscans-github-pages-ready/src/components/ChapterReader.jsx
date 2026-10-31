@@ -64,7 +64,7 @@ function MangaPageImage({ rawUrl, pageNum, chapterUrl = '' }) {
 
     if (!rawUrl) return null;
 
-    const chParam = chapterUrl ? `&chapterUrl=${encodeURIComponent(chapterUrl)}` : '';
+const chParam = chapterUrl ? `&chapterUrl=${encodeURIComponent(chapterUrl)}` : '';
     const sources = [
         `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}${chParam}`,
         `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`,
