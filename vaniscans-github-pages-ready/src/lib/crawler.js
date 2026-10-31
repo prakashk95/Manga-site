@@ -316,7 +316,7 @@ export function parseMangaKatanaPagesHtml(html) {
 }
 
 // ============================================================================
-// MANHUAUS.CLUB & MANHUAUS.COM SCRAPER FUNCTIONS
+// MANHUAUS.CLUB & MANHUAUS.COM SCRAPER FUNCTIONS (V5 FIXED)
 // ============================================================================
 
 function resolveManhuausOrigin(urlStr = '') {
@@ -522,23 +522,19 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
         });
     }
 
-    // 2. Redesigned ManhuaUS.club / Arena-style chapter list container
+    // 2. Redesigned ManhuaUS.club / Arena-style chapter list container (V5 Fixed: matches concatenated tags like 1Chapter 1)
     if (rawChapters.length === 0) {
         let chapterSection = html;
-        const startMarkers = [
-            /LATEST\s+MANGA\s+RELEASES[\s\S]{0,600}?(?:First\s+chapter|Newest|Oldest)/i,
-            /id=["'](?:chapters|chapterlist|manga-chapters-holder|chapter-list)["']/i,
-            /class=["'][^"']*(?:chapter-list|chapters-list|eplister|list-chapter)[^"']*["']/i
-        ];
-        for (const sm of startMarkers) {
-            const idxMatch = chapterSection.match(sm);
-            if (idxMatch && typeof idxMatch.index === 'number') {
-                chapterSection = chapterSection.slice(idxMatch.index);
-                break;
-            }
+        const startMatch =
+            chapterSection.match(/First\s+chapter[\s\S]{0,300}?Latest\s+chapter/i) ||
+            chapterSection.match(/Chapters\s*<[^>]*>\s*\d+/i) ||
+            chapterSection.match(/id=["'](?:chapters|chapterlist|manga-chapters-holder|chapter-list)["']/i);
+
+        if (startMatch && typeof startMatch.index === 'number') {
+            chapterSection = chapterSection.slice(startMatch.index + startMatch[0].length);
         }
-        const endMatch = chapterSection.match(/No\s+chapters\s+match\s+your\s+search|MANGA\s+DISCUSSION|<footer/i);
-        if (endMatch && typeof endMatch.index === 'number' && endMatch.index > 100) {
+        const endMatch = chapterSection.match(/No\s+chapters\s+match\s+your\s+search|Join\s+the\s+discussion|<footer/i);
+        if (endMatch && typeof endMatch.index === 'number' && endMatch.index > 50) {
             chapterSection = chapterSection.slice(0, endMatch.index);
         }
 
@@ -559,11 +555,11 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
                 if (
                     /\/manga\/page\/\d+/i.test(fullUrl) ||
                     /[?&](?:page|cpage|m_orderby)=/i.test(fullUrl) ||
-                    (seriesSlug && new RegExp(`\\/manga\\/${seriesSlug}\\/?$`, 'i').test(fullUrl))
+                    (seriesSlug && new RegExp(`\\/manga\\/${seriesSlug}\\/?$`, 'i').test(fullUrl)) ||
+                    /\/manga\/[^/?#]+\/?$/i.test(fullUrl)
                 ) {
                     continue;
                 }
-                if (/\/manga\/[^/?#]+\/?$/i.test(fullUrl)) continue;
 
                 const text = stripHtmlTags(am[2]);
                 if (
@@ -576,9 +572,14 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
                 const cleanPath = fullUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
                 const lastSeg = cleanPath.split('/').pop() || '';
 
-                const numFromText = text.match(/\bchapter\s*(\d+(?:\.\d+)?)/i) || text.match(/^(\d+(?:\.\d+)?)\s+chapter/i);
+                // V5 fix: No \b before chapter so "1Chapter 1" matches successfully
+                const numFromText =
+                    text.match(/chapter\s*[-:#]?\s*(\d+(?:\.\d+)?)/i) ||
+                    text.match(/episode\s*[-:#]?\s*(\d+(?:\.\d+)?)/i) ||
+                    text.match(/(?:\b|^)(\d+(?:\.\d+)?)\s*chapter/i);
+
                 const numFromSlug =
-                    lastSeg.match(/chapter[-_]?(\d+(?:[.-]\d+)?)/i) ||
+                    lastSeg.match(/chapter[-_]?(\d+(?:\.\d+)?)/i) ||
                     lastSeg.match(/^c(\d+(?:\.\d+)?)$/i);
 
                 const numMatch = numFromText || numFromSlug;
@@ -598,7 +599,7 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
         };
 
         scanAnchors(chapterSection);
-        if (rawChapters.length === 0 && chapterSection !== html) {
+        if (rawChapters.length <= 1 && chapterSection !== html) {
             scanAnchors(html);
         }
     }
@@ -795,7 +796,7 @@ export async function fetchManhuausChaptersWithAjax(targetUrl) {
 
     const allChapters = parseManhuausChaptersHtml(html, cleanSeriesUrl);
 
-    // Check if the series page has paginated chapter tabs (e.g. ?page=2 or ?cpage=2 up to 15 pages)
+    // Check if the series page has paginated chapter tabs (up to 15 pages)
     const pageNums = new Set();
     const pageLinkRegex = /href=["']([^"']*(?:[?&](?:page|cpage|chapter_page)=(\d+))[^"']*)["']/gi;
     let pm;
