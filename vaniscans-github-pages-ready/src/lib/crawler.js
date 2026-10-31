@@ -532,12 +532,15 @@ export async function fetchHtmlWithFallback(targetUrl) {
         throw new Error('Empty html');
     };
 
-    return await Promise.any([
-        fetchCandidate(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, false),
-        fetchCandidate(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, false),
-        fetchCandidate(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, true),
-        fetchCandidate(`https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, false)
-    ]);
+    try {
+        return await Promise.any([
+            fetchCandidate(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, false),
+            fetchCandidate(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, false),
+            fetchCandidate(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, true)
+        ]);
+    } catch (_) {
+        throw new Error(`Upstream host (${new URL(targetUrl).hostname}) blocked proxy requests due to Cloudflare bot protection.`);
+    }
 }
 
 export async function fetchManhuausChaptersWithAjax(targetUrl) {
@@ -594,11 +597,15 @@ export async function fetchManhuausChaptersWithAjax(targetUrl) {
 }
 
 export const MANGAFIRE_API_BASE =
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MANGAFIRE_API_URL) || process.env.MANGAFIRE_API_URL ||
-    process.env.MANGAFIRE_API_URL ||
-    'http://localhost:3001/api';
+    (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.PUBLIC_MANGAFIRE_API_URL || import.meta.env.MANGAFIRE_API_URL)) ||
+    (typeof process !== 'undefined' && process.env && (process.env.PUBLIC_MANGAFIRE_API_URL || process.env.MANGAFIRE_API_URL)) ||
+    '';
 
 export async function fetchMangaFireSearch(query = '', page = 1) {
+    const baseUrl = MANGAFIRE_API_BASE.replace(/\/+$/, '');
+    if (!baseUrl) {
+        throw new Error('PUBLIC_MANGAFIRE_API_URL is not configured in Render environment variables.');
+    }
     const baseUrl = MANGAFIRE_API_BASE.replace(/\/+$/, '');
     const cleanQuery = (query || '').trim();
     const endpoint = cleanQuery
