@@ -31,7 +31,6 @@ export async function POST({ request }) {
         if (existing.rows.length === 0 && manga.mangafireId) {
             existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE mangafireId = ?', args: [manga.mangafireId] });
         }
-        }
 
         const existingRow = existing.rows.length > 0 ? existing.rows[0] : null;
         const finalId = existingRow ? existingRow.id : manga.id;
@@ -48,8 +47,9 @@ export async function POST({ request }) {
 
         await db.execute({
             sql: `INSERT INTO mangas (
+                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId,
                 title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 mangadexId = excluded.mangadexId,
                 mangakatanaId = excluded.mangakatanaId,
