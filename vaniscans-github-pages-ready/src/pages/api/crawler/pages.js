@@ -15,15 +15,12 @@ export async function GET({ request }) {
     const url = new URL(request.url);
     const targetUrlParam = (url.searchParams.get('url') || '').trim();
     const rawSource = url.searchParams.get('source') || 'mangadex';
-    const source = targetUrlParam.includes('manhuaus.club') ? 'manhuaus' : rawSource;
 
     if (false) {
         if (!targetUrlParam.startsWith('http')) {
-            return Response.json({ error: 'Valid ManhuaUS chapter url required' }, { status: 400, headers: NO_STORE_HEADERS });
         }
         try {
             const { html } = await fetchHtmlWithFallback(targetUrlParam);
-            const pages = parseManhuausPagesHtml(html);
             return Response.json({ result: 'ok', pages, pagesSaver: pages }, { headers: NO_STORE_HEADERS });
         } catch (err) {
             return Response.json({ error: err.message, pages: [], pagesSaver: [] }, { status: 500, headers: NO_STORE_HEADERS });

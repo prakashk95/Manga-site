@@ -30,8 +30,6 @@ const SCHEMA_STATEMENTS = [
         mangakatanaId TEXT,
         mangakatanaUrl TEXT,
         mangafireId TEXT,
-        manhuausId TEXT,
-        manhuausUrl TEXT,
         title TEXT NOT NULL,
         author TEXT,
         cover TEXT,
@@ -44,15 +42,12 @@ const SCHEMA_STATEMENTS = [
         metaTitle TEXT,
         metaDescription TEXT
     )`,
-    `ALTER TABLE mangas ADD COLUMN manhuausId TEXT`,
-    `ALTER TABLE mangas ADD COLUMN manhuausUrl TEXT`,
     `CREATE TABLE IF NOT EXISTS chapters (
         id TEXT PRIMARY KEY,
         mangaId TEXT NOT NULL,
         mangadexChapterId TEXT,
         mangakatanaChapterUrl TEXT,
         mangafireChapterId TEXT,
-        manhuausChapterUrl TEXT,
         title TEXT,
         number REAL DEFAULT 1,
         pages TEXT,
@@ -60,7 +55,6 @@ const SCHEMA_STATEMENTS = [
         atHomeUpdatedAt INTEGER,
         createdAt INTEGER
     )`,
-    `ALTER TABLE chapters ADD COLUMN manhuausChapterUrl TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_chapters_mangaId ON chapters(mangaId)`,
     `CREATE INDEX IF NOT EXISTS idx_mangas_updatedAt ON mangas(updatedAt DESC)`,
     `CREATE TABLE IF NOT EXISTS comments (
@@ -156,7 +150,6 @@ export async function getDb() {
 export function getMangaSlug(m) {
     if (!m) return 'series';
     const base = (m.title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.manhuausId || m.id || '').replace(/^manga-(md|mk|mf|mu)-/, '').slice(0, 8).toLowerCase();
     return hash ? `${base}-${hash}` : base;
 }
 
@@ -196,8 +189,6 @@ export async function getServerCatalogWithChapters() {
                 mangakatanaId: r.mangakatanaId || null,
                 mangakatanaUrl: r.mangakatanaUrl || null,
                 mangafireId: r.mangafireId || null,
-                manhuausId: r.manhuausId || null,
-                manhuausUrl: r.manhuausUrl || null,
                 title: r.title,
                 author: r.author || 'Author Unknown',
                 cover: r.cover || '',
@@ -242,7 +233,6 @@ export async function getServerMangaBySlug(slug = '') {
                 mangadexChapterId: r.mangadexChapterId || null,
                 mangakatanaChapterUrl: r.mangakatanaChapterUrl || null,
                 mangafireChapterId: r.mangafireChapterId || null,
-                manhuausChapterUrl: r.manhuausChapterUrl || null,
                 title: r.title || `Chapter ${r.number || 1}`,
                 number: Number(r.number) || 1,
                 pages: Array.isArray(pages) ? pages : [],

@@ -12,11 +12,7 @@ export async function GET({ request }) {
 
         let referer = 'https://mangakatana.com/';
         if (
-            source === 'manhuaus' ||
-            targetUrl.includes('manhuaus') ||
-            chapterUrl.includes('manhuaus.club')
         ) {
-            referer = 'https://manhuaus.club/';
         } else if (targetUrl.includes('mangadex.org')) {
             referer = 'https://mangadex.org/';
         } else if (source === 'mangafire' || targetUrl.includes('mangafire')) {

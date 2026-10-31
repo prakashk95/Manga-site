@@ -9,7 +9,7 @@ import {
     deleteAndSyncComment,
     saveLocalChaptersBulk
 } from '@/lib/clientStorage';
-import { parseMangaKatanaPagesHtml, parseManhuausPagesHtml, fetchMangaFirePages } from '@/lib/crawler';
+import { parseMangaKatanaPagesHtml,  fetchMangaFirePages } from '@/lib/crawler';
 
 function AdSlotBanner({ slot }) {
     if (!slot || !slot.enabled) return null;
@@ -159,7 +159,6 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 }
                 const found = list.find(m => {
                     const mSlug = (m.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-                    const shortHash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.manhuausId || m.id || '').replace(/^manga-(md|mk|mf|mu)-/, '').slice(0, 8).toLowerCase();
                     const fullSlug = shortHash ? `${mSlug}-${shortHash}` : mSlug;
                     return fullSlug === slug.toLowerCase() || m.id.toLowerCase() === slug.toLowerCase();
                 });
@@ -224,18 +223,13 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                     });
                 }
             } catch (_) {}
-        } else if (needsRefresh && (chapterObj.manhuausChapterUrl || (chapterObj.url && chapterObj.url.includes('manhuaus.club')))) {
-            const rawMuUrl = chapterObj.manhuausChapterUrl || chapterObj.url;
-            const muUrl = rawMuUrl.startsWith('http') ? rawMuUrl : `https://manhuaus.club${rawMuUrl.startsWith('/') ? '' : '/'}${rawMuUrl}`;
             try {
                 let freshPages = [];
-                const proxyRes = await fetch(`/api/proxy/img?mode=html&source=manhuaus&url=${encodeURIComponent(muUrl)}`, { cache: 'no-store' });
                 if (proxyRes.ok) {
                     const html = await proxyRes.text();
-                    freshPages = parseManhuausPagesHtml(html);
+                    freshPages = (html);
                 }
                 if (freshPages.length === 0) {
-                    const res = await fetch(`/api/crawler/pages?source=manhuaus&url=${encodeURIComponent(muUrl)}`, { cache: 'no-store' });
                     const json = await res.json();
                     freshPages = json.pages || [];
                 }
@@ -348,7 +342,6 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
 
     const pages = currentChapter.pages || [];
     const ads = monetization?.ads || {};
-    const rawChUrl = currentChapter.manhuausChapterUrl || currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
     const activeChapterUrl = rawChUrl.startsWith('http') 
         ? rawChUrl 
         : (rawChUrl ? `https://mangakatana.com${rawChUrl.startsWith('/') ? '' : '/'}${rawChUrl}` : '');

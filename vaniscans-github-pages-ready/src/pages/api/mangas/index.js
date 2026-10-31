@@ -31,8 +31,6 @@ export async function POST({ request }) {
         if (existing.rows.length === 0 && manga.mangafireId) {
             existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE mangafireId = ?', args: [manga.mangafireId] });
         }
-        if (existing.rows.length === 0 && manga.manhuausId) {
-            existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE manhuausId = ?', args: [manga.manhuausId] }).catch(() => ({ rows: [] }));
         }
 
         const existingRow = existing.rows.length > 0 ? existing.rows[0] : null;
@@ -50,7 +48,6 @@ export async function POST({ request }) {
 
         await db.execute({
             sql: `INSERT INTO mangas (
-                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, manhuausId, manhuausUrl,
                 title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
@@ -58,8 +55,6 @@ export async function POST({ request }) {
                 mangakatanaId = excluded.mangakatanaId,
                 mangakatanaUrl = excluded.mangakatanaUrl,
                 mangafireId = excluded.mangafireId,
-                manhuausId = excluded.manhuausId,
-                manhuausUrl = excluded.manhuausUrl,
                 title = excluded.title,
                 author = excluded.author,
                 cover = excluded.cover,
@@ -77,8 +72,6 @@ export async function POST({ request }) {
                 manga.mangakatanaId || null,
                 manga.mangakatanaUrl || null,
                 manga.mangafireId || null,
-                manga.manhuausId || null,
-                manga.manhuausUrl || null,
                 manga.title,
                 manga.author || 'Author Unknown',
                 manga.cover || '',

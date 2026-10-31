@@ -155,7 +155,6 @@ export default function CatalogInteractive({ initialMangas = [] }) {
     const getMangaSlug = (m) => {
         if (!m) return 'series';
         const base = (m.title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-        const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.manhuausId || m.id || '').replace(/^manga-(md|mk|mf|mu)-/, '').slice(0, 8);
         return hash ? `${base}-${hash}` : base;
     };
 
