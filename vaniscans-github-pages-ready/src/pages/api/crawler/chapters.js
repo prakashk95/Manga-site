@@ -68,7 +68,7 @@ export async function GET({ request }) {
     const url = new URL(request.url);
     const rawUrlParam = (url.searchParams.get('url') || url.searchParams.get('slug') || '').trim();
     const rawSource = url.searchParams.get('source') || 'mangadex';
-    const source = rawUrlParam.includes('manhuaus.club') ? 'manhuaus' : rawSource;
+    const source = rawUrlParam.includes('manhuaus.') ? 'manhuaus' : rawSource;
 
     if (source === 'manhuaus') {
         const targetUrl = rawUrlParam.startsWith('http')

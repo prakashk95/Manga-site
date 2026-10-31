@@ -15,7 +15,7 @@ export async function GET({ request }) {
     const url = new URL(request.url);
     const targetUrlParam = (url.searchParams.get('url') || '').trim();
     const rawSource = url.searchParams.get('source') || 'mangadex';
-    const source = targetUrlParam.includes('manhuaus.club') ? 'manhuaus' : rawSource;
+    const source = targetUrlParam.includes('manhuaus.') ? 'manhuaus' : rawSource;
 
     if (source === 'manhuaus') {
         if (!targetUrlParam.startsWith('http')) {
@@ -23,7 +23,7 @@ export async function GET({ request }) {
         }
         try {
             const { html } = await fetchHtmlWithFallback(targetUrlParam);
-            const pages = parseManhuausPagesHtml(html);
+            const pages = parseManhuausPagesHtml(html, targetUrlParam);
             return Response.json({ result: 'ok', pages, pagesSaver: pages }, { headers: NO_STORE_HEADERS });
         } catch (err) {
             return Response.json({ error: err.message, pages: [], pagesSaver: [] }, { status: 500, headers: NO_STORE_HEADERS });

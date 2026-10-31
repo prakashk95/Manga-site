@@ -13,12 +13,12 @@ export async function GET({ request }) {
     const url = new URL(request.url);
     const q = (url.searchParams.get('q') || '').trim();
     const rawSource = url.searchParams.get('source') || 'mangadex';
-    const source = q.includes('manhuaus.club') ? 'manhuaus' : rawSource;
+    const source = q.includes('manhuaus.') ? 'manhuaus' : rawSource;
 
     if (source === 'manhuaus') {
         try {
             let targetUrl = 'https://manhuaus.club/manga/?m_orderby=latest';
-            if (q.startsWith('http') && q.includes('manhuaus.club')) {
+            if (q.startsWith('http') && q.includes('manhuaus.')) {
                 targetUrl = q;
             } else if (q) {
                 targetUrl = `https://manhuaus.club/?s=${encodeURIComponent(q)}&post_type=wp-manga`;

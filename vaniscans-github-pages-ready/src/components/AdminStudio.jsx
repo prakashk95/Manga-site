@@ -362,7 +362,7 @@ export default function AdminPanelPage() {
 
         const parsedChs = isKatana
             ? parseMangaKatanaChaptersHtml(manualHtmlInput)
-            : parseManhuausChaptersHtml(manualHtmlInput);
+            : parseManhuausChaptersHtml(manualHtmlInput, q);
 
         setCrawlerWorkspace(true);
         if (parsedSeries.length > 0) {
@@ -390,9 +390,9 @@ export default function AdminPanelPage() {
         if (presetQuery !== null) setSearchQuery(presetQuery);
 
         let activeSrc = forceSource || crawlerSource;
-        if (q.includes('manhuaus.club')) activeSrc = 'manhuaus';
+        if (q.includes('manhuaus.')) activeSrc = 'manhuaus';
         else if (q.includes('mangakatana.com')) activeSrc = 'mangakatana';
-        if (forceSource || q.includes('manhuaus.club') || q.includes('mangakatana.com')) {
+        if (forceSource || q.includes('manhuaus.') || q.includes('mangakatana.com')) {
             setCrawlerSource(activeSrc);
         }
 
@@ -423,7 +423,7 @@ export default function AdminPanelPage() {
             if (list.length === 0) {
                 if (activeSrc === 'manhuaus') {
                     let targetUrl = 'https://manhuaus.club/manga/?m_orderby=latest';
-                    if (q.startsWith('http') && q.includes('manhuaus.club')) targetUrl = q;
+                    if (q.startsWith('http') && q.includes('manhuaus.')) targetUrl = q;
                     else if (q) targetUrl = `https://manhuaus.club/?s=${encodeURIComponent(q)}&post_type=wp-manga`;
                     const html = await fetchClientHtmlFallback(targetUrl);
                     list = parseManhuausHtmlSearch(html, targetUrl, q);
@@ -498,7 +498,7 @@ export default function AdminPanelPage() {
                         ? item.manhuausUrl
                         : `https://manhuaus.club/manga/${(item.manhuausId || '').replace(/^\/+|\/+$/g, '')}/`;
                     const html = await fetchClientHtmlFallback(cleanUrl);
-                    list = parseManhuausChaptersHtml(html);
+                    list = parseManhuausChaptersHtml(html, cleanUrl);
                 } else if (isMangaFire) {
                     list = await fetchMangaFireChapters(item.mangafireId, crawlerLang);
                 } else if (isKatana) {
@@ -622,7 +622,7 @@ export default function AdminPanelPage() {
                     if (isManhuaus && ch.url) {
                         try {
                             const html = await fetchClientHtmlFallback(ch.url);
-                            pages = parseManhuausPagesHtml(html);
+                            pages = parseManhuausPagesHtml(html, ch.url);
                             pagesSaver = pages;
                         } catch (_) {}
                     } else if (isMangaFire && (ch.mangafireChapterId || ch.id)) {

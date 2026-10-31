@@ -16,9 +16,11 @@ export async function GET({ request }) {
         if (
             source === 'manhuaus' ||
             targetUrl.includes('manhuaus') ||
-            chapterUrl.includes('manhuaus.club')
+            chapterUrl.includes('manhuaus.')
         ) {
-            referer = 'https://manhuaus.club/';
+            referer = (targetUrl.includes('manhuaus.com') || chapterUrl.includes('manhuaus.com'))
+                ? 'https://manhuaus.com/'
+                : 'https://manhuaus.club/';
         } else if (targetUrl.includes('mangadex.org')) {
             referer = 'https://mangadex.org/';
         } else if (source === 'mangafire' || targetUrl.includes('mangafire')) {

@@ -8,10 +8,6 @@ export const MK_HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Upgrade-Insecure-Requests': '1',
     'Referer': 'https://mangakatana.com/'
 };
 
@@ -21,10 +17,6 @@ export const MU_HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'same-origin',
-    'Upgrade-Insecure-Requests': '1',
     'Referer': 'https://manhuaus.club/'
 };
 
@@ -41,7 +33,7 @@ export function isCloudflareOrBlockedHtml(html = '') {
 
 export function stripHtmlTags(str) {
     return (str || '')
-        .replace(/<[^>]*>/g, '')
+        .replace(/<[^>]*>/g, ' ')
         .replace(/&nbsp;/g, ' ')
         .replace(/&amp;/g, '&')
         .replace(/&quot;/g, '"')
@@ -53,20 +45,40 @@ export function stripHtmlTags(str) {
         .trim();
 }
 
-function extractBestImgUrl(imgTagHtml = '') {
+function normalizeAssetUrl(raw = '', baseOrigin = MANHUAUS_BASE) {
+    if (!raw || typeof raw !== 'string') return '';
+    const trimmed = raw.trim().replace(/\\+\//g, '/');
+    if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('javascript:')) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (trimmed.startsWith('//')) return `https:${trimmed}`;
+    if (trimmed.startsWith('/')) return `${baseOrigin.replace(/\/+$/, '')}${trimmed}`;
+    return '';
+}
+
+function extractBestImgUrl(imgTagHtml = '', baseOrigin = MANHUAUS_BASE) {
     if (!imgTagHtml) return '';
-    const attrNames = ['data-src', 'data-lazy-src', 'data-cfsrc', 'data-original', 'src'];
+    const attrNames = [
+        'data-src',
+        'data-lazy-src',
+        'data-cfsrc',
+        'data-original',
+        'data-full-url',
+        'src'
+    ];
     for (const attr of attrNames) {
-        const m = imgTagHtml.match(new RegExp(`${attr}=["'](\\s*https?:\\/\\/[^"']+)["']`, 'i'));
+        const m = imgTagHtml.match(new RegExp(`\\b${attr}=["']([^"']+)["']`, 'i'));
         if (m && m[1]) {
-            const candidate = m[1].trim();
-            if (!candidate.startsWith('data:')) return candidate;
+            const normalized = normalizeAssetUrl(m[1], baseOrigin);
+            if (normalized && !/blank\.gif|placeholder|loading\.gif|1x1/i.test(normalized)) {
+                return normalized;
+            }
         }
     }
     const srcsetMatch = imgTagHtml.match(/(?:data-srcset|srcset)=["']([^"']+)["']/i);
     if (srcsetMatch && srcsetMatch[1]) {
         const firstPart = srcsetMatch[1].trim().split(',')[0].trim().split(/\s+/)[0];
-        if (/^https?:\/\//i.test(firstPart)) return firstPart;
+        const normalized = normalizeAssetUrl(firstPart, baseOrigin);
+        if (normalized) return normalized;
     }
     return '';
 }
@@ -304,14 +316,24 @@ export function parseMangaKatanaPagesHtml(html) {
 }
 
 // ============================================================================
-// MANHUAUS.CLUB SCRAPER FUNCTIONS (Supports both Madara & Redesigned Theme)
+// MANHUAUS.CLUB & MANHUAUS.COM SCRAPER FUNCTIONS
 // ============================================================================
+
+function resolveManhuausOrigin(urlStr = '') {
+    try {
+        if (urlStr && urlStr.startsWith('http')) {
+            return new URL(urlStr).origin;
+        }
+    } catch (_) {}
+    return MANHUAUS_BASE;
+}
 
 export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
     const results = [];
     if (!html || isCloudflareOrBlockedHtml(html)) return results;
 
     const candidateUrl = (finalUrl || fallbackQuery || '').trim();
+    const origin = resolveManhuausOrigin(candidateUrl);
     const isDirectMangaUrl =
         /\/manga\/[^/?#]+\/?$/i.test(candidateUrl) &&
         !/\/manga\/page\//i.test(candidateUrl);
@@ -319,6 +341,7 @@ export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '')
     const isSingleSeriesPage =
         ((html.includes('summary_image') && html.includes('post-title')) ||
          html.includes('MANGA DISCUSSION') ||
+         html.includes('No chapters match your search') ||
          html.includes('manga-chapters-holder') ||
          isDirectMangaUrl) &&
         !html.includes('c-tabs-item__content') &&
@@ -334,19 +357,19 @@ export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '')
             ? h1Match[1].replace(/<span[^>]*>[\s\S]*?<\/span>/gi, '')
             : (ogTitleMatch ? ogTitleMatch[1] : '');
         const cleanTitle = stripHtmlTags(rawTitle)
-            .replace(/\s*[-–|]\s*Manhuaus.*$/i, '')
+            .replace(/\s*[-–|]\s*(?:Manhuaus|Arena Scans).*$/i, '')
             .trim() || fallbackQuery || 'ManhuaUS Series';
 
         const summaryImgBlock = html.match(/<div[^>]*class="[^"]*summary_image[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
         const ogImageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
         const rawCover =
-            (summaryImgBlock ? extractBestImgUrl(summaryImgBlock[1]) : '') ||
-            (ogImageMatch ? ogImageMatch[1].trim() : '') ||
+            (summaryImgBlock ? extractBestImgUrl(summaryImgBlock[1], origin) : '') ||
+            (ogImageMatch ? normalizeAssetUrl(ogImageMatch[1], origin) : '') ||
             'https://placehold.co/400x600/1a1d30/ec4899?text=ManhuaUS';
 
         const ogUrlMatch = html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i);
         const mangaUrl = (ogUrlMatch ? ogUrlMatch[1].trim() : candidateUrl) || '';
-        const slug = mangaUrl.split('/manga/')[1]?.split('/')[0]?.replace(/\/+$/, '') || ('mu-' + Date.now());
+        const slug = mangaUrl.split('/manga/')[1]?.split(/[/?#]/)[0]?.replace(/\/+$/, '') || ('mu-' + Date.now());
 
         const authorBlock = html.match(/<div[^>]*class="[^"]*author-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
         const author = authorBlock ? stripHtmlTags(authorBlock[1]) : 'ManhuaUS Studio';
@@ -369,14 +392,14 @@ export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '')
             ? stripHtmlTags(summaryBlock[1])
             : ogDescMatch
             ? stripHtmlTags(ogDescMatch[1])
-            : 'Imported directly from ManhuaUS.club.';
+            : 'Imported directly from ManhuaUS.';
 
         const statusBlock = html.match(/<div[^>]*class="[^"]*post-status[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-        const isCompleted = (statusBlock && /completed/i.test(statusBlock[1])) || /\bCompleted\b/i.test(html);
+        const isCompleted = (statusBlock && /completed/i.test(statusBlock[1])) || /Status\s*Completed/i.test(stripHtmlTags(html));
 
         results.push({
             manhuausId: slug,
-            manhuausUrl: mangaUrl.startsWith('http') ? mangaUrl : `${MANHUAUS_BASE}/manga/${slug}/`,
+            manhuausUrl: mangaUrl.startsWith('http') ? mangaUrl : `${origin}/manga/${slug}/`,
             sourceHost: 'manhuaus.club',
             title: cleanTitle,
             author: author || 'ManhuaUS Creator',
@@ -389,7 +412,6 @@ export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '')
         return results;
     }
 
-    // Parse Madara search cards OR modern grid cards
     const blocks = html.includes('c-tabs-item__content')
         ? html.split(/<div[^>]+class="[^"]*c-tabs-item__content[^"]*"[^>]*>/i).slice(1)
         : html.includes('page-item-detail')
@@ -406,47 +428,30 @@ export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '')
 
         const mangaUrl = titleLink[1].trim();
         const title = stripHtmlTags(titleLink[2]);
-        const slug = mangaUrl.split('/manga/')[1]?.split('/')[0]?.replace(/\/+$/, '') || '';
+        const slug = mangaUrl.split('/manga/')[1]?.split(/[/?#]/)[0]?.replace(/\/+$/, '') || '';
         if (!slug || slug === 'page' || seenSlugs.has(slug)) continue;
         seenSlugs.add(slug);
 
         const imgTagMatch = block.match(/<img[^>]+>/i);
-        const rawCover = (imgTagMatch ? extractBestImgUrl(imgTagMatch[0]) : '') ||
+        const rawCover = (imgTagMatch ? extractBestImgUrl(imgTagMatch[0], origin) : '') ||
                          'https://placehold.co/400x600/1a1d30/ec4899?text=ManhuaUS';
-
-        const genresBlock = block.match(/<div[^>]*class="[^"]*mg_genres[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-        const genres = [];
-        if (genresBlock) {
-            const gRegex = /<a[^>]*>([^<]+)<\/a>/gi;
-            let gm;
-            while ((gm = gRegex.exec(genresBlock[1])) !== null) {
-                genres.push(stripHtmlTags(gm[1]));
-            }
-        }
-
-        const authorBlock = block.match(/<div[^>]*class="[^"]*mg_author[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-        const author = authorBlock ? stripHtmlTags(authorBlock[1].replace(/Author\(s\)/i, '')) : 'ManhuaUS Studio';
-
-        const statusBlock = block.match(/<div[^>]*class="[^"]*mg_status[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-        const isCompleted = statusBlock && /completed/i.test(statusBlock[1]);
 
         results.push({
             manhuausId: slug,
-            manhuausUrl: mangaUrl.startsWith('http') ? mangaUrl : `${MANHUAUS_BASE}${mangaUrl.startsWith('/') ? '' : '/'}${mangaUrl}`,
+            manhuausUrl: mangaUrl.startsWith('http') ? mangaUrl : `${origin}${mangaUrl.startsWith('/') ? '' : '/'}${mangaUrl}`,
             sourceHost: 'manhuaus.club',
             title: title || slug,
-            author: author || 'ManhuaUS Studio',
+            author: 'ManhuaUS Studio',
             cover: rawCover,
-            genres: genres.length > 0 ? genres.slice(0, 4) : ['Action', 'Manhua', 'Fantasy'],
-            status: isCompleted ? 'Completed' : 'Ongoing',
+            genres: ['Action', 'Manhua', 'Fantasy'],
+            status: 'Ongoing',
             rating: '9.7',
-            synopsis: `Imported from ManhuaUS.club (${title || slug}).`
+            synopsis: `Imported from ManhuaUS (${title || slug}).`
         });
     }
 
-    // Fallback generic anchor scan for redesigned ManhuaUS catalog/search pages
     if (results.length === 0) {
-        const linkRegex = /<a[^>]+href=["'](https?:\/\/[^"']*manhuaus\.club\/manga\/([^/"'?#]+)\/?|\/manga\/([^/"'?#]+)\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        const linkRegex = /<a[^>]+href=["'](https?:\/\/[^"']*manhuaus\.[a-z]+\/manga\/([^/"'?#]+)\/?|\/manga\/([^/"'?#]+)\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
         let m;
         while ((m = linkRegex.exec(html)) !== null) {
             const rawHref = m[1];
@@ -455,21 +460,21 @@ export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '')
 
             const inner = m[4] || '';
             const imgTag = inner.match(/<img[^>]+>/i);
-            let label = stripHtmlTags(inner).replace(/^(?:Read now|Details|NEW)\s*/i, '').trim();
+            const label = stripHtmlTags(inner).replace(/^(?:Read now|Details|NEW)\s*/i, '').trim();
             if (!label || /^chapter\s*\d+/i.test(label) || label.length < 2) continue;
 
             seenSlugs.add(slug);
             results.push({
                 manhuausId: slug,
-                manhuausUrl: rawHref.startsWith('http') ? rawHref : `${MANHUAUS_BASE}${rawHref.startsWith('/') ? '' : '/'}${rawHref}`,
+                manhuausUrl: rawHref.startsWith('http') ? rawHref : `${origin}${rawHref.startsWith('/') ? '' : '/'}${rawHref}`,
                 sourceHost: 'manhuaus.club',
                 title: label,
                 author: 'ManhuaUS Studio',
-                cover: (imgTag ? extractBestImgUrl(imgTag[0]) : '') || 'https://placehold.co/400x600/1a1d30/ec4899?text=ManhuaUS',
+                cover: (imgTag ? extractBestImgUrl(imgTag[0], origin) : '') || 'https://placehold.co/400x600/1a1d30/ec4899?text=ManhuaUS',
                 genres: ['Action', 'Manhua', 'Fantasy'],
                 status: 'Ongoing',
                 rating: '9.7',
-                synopsis: `Imported from ManhuaUS.club (${label}).`
+                synopsis: `Imported from ManhuaUS (${label}).`
             });
         }
     }
@@ -477,17 +482,23 @@ export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '')
     return results;
 }
 
-export function parseManhuausChaptersHtml(html) {
+export function parseManhuausChaptersHtml(html, seriesUrl = '') {
     const rawChapters = [];
     const seenUrls = new Set();
     if (!html) return rawChapters;
 
-    // 1. Classic Madara li.wp-manga-chapter
-    const liRegex = /<li[^>]*class="[^"]*\bwp-manga-chapter\b[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    const origin = resolveManhuausOrigin(seriesUrl);
+    const seriesSlugMatch =
+        seriesUrl.match(/\/manga\/([^/?#]+)/i) ||
+        html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["'][^"']*\/manga\/([^/"'?#]+)/i);
+    const seriesSlug = seriesSlugMatch ? seriesSlugMatch[1].toLowerCase() : '';
+
+    // 1. Classic Madara <li class="wp-manga-chapter">
+    const liRegex = /<li[^>]*class="[^"]*\bwp-manga-chapter\b[^"]*"[^>]*>[\s\S]*?<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
 
     while ((match = liRegex.exec(html)) !== null) {
-        const chUrl = match[1].trim();
+        const chUrl = match[1].split('#')[0].trim();
         if (!chUrl || seenUrls.has(chUrl)) continue;
         seenUrls.add(chUrl);
 
@@ -505,43 +516,126 @@ export function parseManhuausChaptersHtml(html) {
 
         rawChapters.push({
             id: chSlug || `ch-${rawChapters.length + 1}`,
-            url: chUrl.startsWith('http') ? chUrl : `${MANHUAUS_BASE}${chUrl.startsWith('/') ? '' : '/'}${chUrl}`,
-            title: rawTitle || `Chapter ${parsedNum || rawChapters.length + 1}`,
+            url: chUrl.startsWith('http') ? chUrl : `${origin}${chUrl.startsWith('/') ? '' : '/'}${chUrl}`,
+            title: rawTitle || `Chapter ${parsedNum ?? rawChapters.length + 1}`,
             parsedNum
         });
     }
 
-    // 2. Redesigned ManhuaUS anchor cards (e.g., /manga/<slug>/chapter-1/ or /chapter-1/)
+    // 2. Redesigned ManhuaUS.club / Arena-style chapter list container
     if (rawChapters.length === 0) {
-        const anchorRegex = /<a[^>]+href=["']([^"']*\/manga\/[^/"']+\/[^/"']+\/?|[^"']*chapter[-_]\d+[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
-        while ((match = anchorRegex.exec(html)) !== null) {
-            const chUrl = match[1].trim();
-            if (!chUrl || seenUrls.has(chUrl) || /\/manga\/page\//i.test(chUrl)) continue;
+        let chapterSection = html;
+        const startMarkers = [
+            /LATEST\s+MANGA\s+RELEASES[\s\S]{0,600}?(?:First\s+chapter|Newest|Oldest)/i,
+            /id=["'](?:chapters|chapterlist|manga-chapters-holder|chapter-list)["']/i,
+            /class=["'][^"']*(?:chapter-list|chapters-list|eplister|list-chapter)[^"']*["']/i
+        ];
+        for (const sm of startMarkers) {
+            const idxMatch = chapterSection.match(sm);
+            if (idxMatch && typeof idxMatch.index === 'number') {
+                chapterSection = chapterSection.slice(idxMatch.index);
+                break;
+            }
+        }
+        const endMatch = chapterSection.match(/No\s+chapters\s+match\s+your\s+search|MANGA\s+DISCUSSION|<footer/i);
+        if (endMatch && typeof endMatch.index === 'number' && endMatch.index > 100) {
+            chapterSection = chapterSection.slice(0, endMatch.index);
+        }
 
-            const text = stripHtmlTags(match[2]);
-            if (/^(?:First chapter|Latest chapter|Read now|Details)$/i.test(text)) continue;
+        const scanAnchors = (scopeHtml) => {
+            const aRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+            let am;
+            while ((am = aRegex.exec(scopeHtml)) !== null) {
+                const rawHref = am[1].trim();
+                if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
 
-            const parts = chUrl.replace(/\/+$/, '').split('/').filter(Boolean);
-            const chSlug = parts[parts.length - 1] || '';
-            const numMatch =
-                chSlug.match(/chapter[-_]?(\d+(?:[.-]\d+)?)/i) ||
-                text.match(/chapter\s*(\d+(?:\.\d+)?)/i);
-            if (!numMatch) continue;
+                const cleanHref = rawHref.split('#')[0].trim();
+                if (!cleanHref) continue;
 
-            seenUrls.add(chUrl);
-            const parsedNum = parseFloat(numMatch[1].replace('-', '.'));
-            rawChapters.push({
-                id: chSlug || `ch-${rawChapters.length + 1}`,
-                url: chUrl.startsWith('http') ? chUrl : `${MANHUAUS_BASE}${chUrl.startsWith('/') ? '' : '/'}${chUrl}`,
-                title: `Chapter ${parsedNum}`,
-                parsedNum
-            });
+                const fullUrl = cleanHref.startsWith('http')
+                    ? cleanHref
+                    : `${origin}${cleanHref.startsWith('/') ? '' : '/'}${cleanHref}`;
+
+                if (
+                    /\/manga\/page\/\d+/i.test(fullUrl) ||
+                    /[?&](?:page|cpage|m_orderby)=/i.test(fullUrl) ||
+                    (seriesSlug && new RegExp(`\\/manga\\/${seriesSlug}\\/?$`, 'i').test(fullUrl))
+                ) {
+                    continue;
+                }
+                if (/\/manga\/[^/?#]+\/?$/i.test(fullUrl)) continue;
+
+                const text = stripHtmlTags(am[2]);
+                if (
+                    /read\s+chapter\s+\d+\s+now/i.test(text) ||
+                    /^(?:first\s+chapter|latest\s+chapter|read\s+now|read\s+first|read\s+last|details|continue\s+reading)$/i.test(text)
+                ) {
+                    continue;
+                }
+
+                const cleanPath = fullUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
+                const lastSeg = cleanPath.split('/').pop() || '';
+
+                const numFromText = text.match(/\bchapter\s*(\d+(?:\.\d+)?)/i) || text.match(/^(\d+(?:\.\d+)?)\s+chapter/i);
+                const numFromSlug =
+                    lastSeg.match(/chapter[-_]?(\d+(?:[.-]\d+)?)/i) ||
+                    lastSeg.match(/^c(\d+(?:\.\d+)?)$/i);
+
+                const numMatch = numFromText || numFromSlug;
+                if (!numMatch) continue;
+
+                if (seenUrls.has(fullUrl)) continue;
+                seenUrls.add(fullUrl);
+
+                const parsedNum = parseFloat(numMatch[1].replace('-', '.'));
+                rawChapters.push({
+                    id: lastSeg || `ch-${rawChapters.length + 1}`,
+                    url: fullUrl,
+                    title: `Chapter ${parsedNum}`,
+                    parsedNum
+                });
+            }
+        };
+
+        scanAnchors(chapterSection);
+        if (rawChapters.length === 0 && chapterSection !== html) {
+            scanAnchors(html);
         }
     }
 
-    rawChapters.reverse();
+    // 3. Embedded <script> JSON chapter list fallback
+    if (rawChapters.length <= 1) {
+        const scriptJsonRegex = /\{[^{}]{0,400}?(?:"chapter_name"|"chapter_slug"|"chap_num"|"number"|"slug")[^{}]{0,400}?\}/gi;
+        let sm;
+        while ((sm = scriptJsonRegex.exec(html)) !== null) {
+            try {
+                const obj = JSON.parse(sm[0]);
+                const rawUrl = obj.url || obj.permalink || obj.href || obj.link ||
+                    (obj.slug && seriesSlug ? `${origin}/manga/${seriesSlug}/${obj.slug}/` : '');
+                if (!rawUrl) continue;
+                const fullUrl = rawUrl.startsWith('http') ? rawUrl : `${origin}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+                if (seenUrls.has(fullUrl)) continue;
+
+                const label = String(obj.chapter_name || obj.title || obj.name || obj.chap_num || obj.number || '');
+                const nm = label.match(/(\d+(?:\.\d+)?)/);
+                if (!nm) continue;
+
+                seenUrls.add(fullUrl);
+                const parsedNum = parseFloat(nm[1]);
+                rawChapters.push({
+                    id: String(obj.id || obj.slug || `ch-${parsedNum}`),
+                    url: fullUrl,
+                    title: `Chapter ${parsedNum}`,
+                    parsedNum
+                });
+            } catch (_) {}
+        }
+    }
+
     const finalChapters = [];
     const seenNumbers = new Set();
+
+    rawChapters.sort((a, b) => (a.parsedNum ?? 999999) - (b.parsedNum ?? 999999));
 
     for (let idx = 0; idx < rawChapters.length; idx++) {
         const ch = rawChapters[idx];
@@ -558,33 +652,79 @@ export function parseManhuausChaptersHtml(html) {
         });
     }
 
-    finalChapters.sort((a, b) => (a.number || 0) - (b.number || 0));
     return finalChapters;
 }
 
-export function parseManhuausPagesHtml(html) {
+export function parseManhuausPagesHtml(html, chapterUrl = '') {
     const pages = [];
     const seen = new Set();
-    if (!html) return pages;
+    if (!html || isCloudflareOrBlockedHtml(html)) return pages;
 
-    const readingMatch = html.match(/<div[^>]*class="[^"]*\b(?:reading-content|chapter-content|reader-area)\b[^"]*"[^>]*>([\s\S]*?)<div[^>]*class="[^"]*(?:entry-header|c-blog-post|wp-manga-nav|footer|comments)/i);
-    const scopeHtml = readingMatch ? readingMatch[1] : html;
+    const origin = resolveManhuausOrigin(chapterUrl);
+    const isJunkImage = (u) =>
+        !u ||
+        /logo|avatar|banner|icon|gravatar|emoji|spinner|loader|preloader|ads|badge|favicon|cover|thumb-\d+x\d+|-\d{2,3}x\d{2,3}\./i.test(u);
 
-    const imgRegex = /<img[^>]+>/gi;
+    const pushPage = (rawUrl) => {
+        const clean = normalizeAssetUrl(rawUrl, origin);
+        if (clean && !isJunkImage(clean) && !seen.has(clean)) {
+            seen.add(clean);
+            pages.push(clean);
+        }
+    };
+
+    // 1. Check preloaded JS arrays first
+    const preloadedMatch =
+        html.match(/chapter_preloaded_images\s*=\s*(\[[\s\S]*?\])\s*;/i) ||
+        html.match(/["']images["']\s*:\s*(\[\s*["'](?:https?:)?\/\/[\s\S]*?\])/i) ||
+        html.match(/(?:page_urls|chapterImages|readerImages|pages)\s*=\s*(\[\s*["'](?:https?:)?\/\/[\s\S]*?\])\s*;/i);
+
+    if (preloadedMatch && preloadedMatch[1]) {
+        const urlHits = preloadedMatch[1].match(/(?:https?:)?\\?\/\\?\/[^"'\s,\]]+/gi) || [];
+        for (const hit of urlHits) {
+            pushPage(hit.replace(/\\\//g, '/'));
+        }
+        if (pages.length >= 2) return pages;
+    }
+
+    // 2. Scoped reader container if available
+    const containerRegexes = [
+        /<div[^>]*class="[^"]*\b(?:reading-content|chapter-content|reader-area|reader-content|chapter-images|vung-doc|container-chapter-reader)\b[^"]*"[^>]*>([\s\S]*?)<(?:footer|div[^>]*class="[^"]*(?:entry-header|c-blog-post|wp-manga-nav|comments|discussion))/i,
+        /<div[^>]*id="[^"]*(?:readerarea|chapter-reader|reading-content|images-content)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
+    ];
+
+    let scopeHtml = '';
+    for (const rx of containerRegexes) {
+        const m = html.match(rx);
+        if (m && m[1] && m[1].includes('<img')) {
+            scopeHtml = m[1];
+            break;
+        }
+    }
+
+    const imgRegex = /<img\b[^>]+>/gi;
     let match;
-    while ((match = imgRegex.exec(scopeHtml)) !== null) {
+
+    if (scopeHtml) {
+        while ((match = imgRegex.exec(scopeHtml)) !== null) {
+            const imgUrl = extractBestImgUrl(match[0], origin);
+            pushPage(imgUrl);
+        }
+        if (pages.length > 0) return pages;
+    }
+
+    // 3. Full-document fallback for custom readers without legacy Madara classes
+    const bodyHtml = html
+        .replace(/<header[\s\S]*?<\/header>/gi, '')
+        .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+        .replace(/<footer[\s\S]*?<\/footer>/gi, '');
+
+    while ((match = imgRegex.exec(bodyHtml)) !== null) {
         const tag = match[0];
-        const isReaderImg =
-            /wp-manga-chapter-img|chapter-img|page-img/i.test(tag) ||
-            /image-\d+/i.test(tag) ||
-            (readingMatch && !/logo|avatar|banner|icon|gravatar/i.test(tag));
-
-        if (!isReaderImg) continue;
-
-        const imgUrl = extractBestImgUrl(tag);
-        if (imgUrl && /^https?:\/\//i.test(imgUrl) && !seen.has(imgUrl)) {
-            seen.add(imgUrl);
-            pages.push(imgUrl);
+        if (/avatar|logo|site-branding|related|recommend/i.test(tag)) continue;
+        const imgUrl = extractBestImgUrl(tag, origin);
+        if (imgUrl && /\.(?:jpe?g|png|webp|avif)(?:[?#].*)?$/i.test(imgUrl)) {
+            pushPage(imgUrl);
         }
     }
 
@@ -592,10 +732,12 @@ export function parseManhuausPagesHtml(html) {
 }
 
 export async function fetchHtmlWithFallback(targetUrl) {
-    const isManhuaus = targetUrl.includes('manhuaus.club');
-    const primaryHeaders = isManhuaus ? MU_HEADERS : MK_HEADERS;
+    const isManhuaus = targetUrl.includes('manhuaus.');
+    const primaryHeaders = isManhuaus
+        ? { ...MU_HEADERS, Referer: resolveManhuausOrigin(targetUrl) + '/' }
+        : MK_HEADERS;
 
-    // 1. Direct server-side fetch with source-matched headers (no self-loopback)
+    // 1. Direct server-side fetch
     try {
         const directRes = await fetch(targetUrl, {
             headers: primaryHeaders,
@@ -611,7 +753,7 @@ export async function fetchHtmlWithFallback(targetUrl) {
         }
     } catch (_) {}
 
-    // 2. Sequential proxy relays (checks for valid non-Cloudflare HTML instead of crashing via aggregate promise)
+    // 2. Sequential proxy relays with Cloudflare challenge filtering
     const relays = [
         { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, json: true },
         { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, json: false },
@@ -642,17 +784,49 @@ export async function fetchHtmlWithFallback(targetUrl) {
     }
 
     throw new Error(
-        `Upstream source (${isManhuaus ? 'ManhuaUS.club' : 'target site'}) blocked automated server/proxy requests with Cloudflare 403. Use the "Paste Page HTML" option below or search MangaDex/MangaFire.`
+        `Upstream source (${isManhuaus ? 'ManhuaUS' : 'target site'}) blocked automated server/proxy requests with Cloudflare 403. Use the "Paste Page HTML" option below or search MangaDex/MangaFire.`
     );
 }
 
 export async function fetchManhuausChaptersWithAjax(targetUrl) {
     const cleanSeriesUrl = targetUrl.replace(/\/+$/, '') + '/';
+    const origin = resolveManhuausOrigin(cleanSeriesUrl);
     const { html } = await fetchHtmlWithFallback(cleanSeriesUrl);
-    let chapters = parseManhuausChaptersHtml(html);
-    if (chapters.length > 0) return chapters;
 
-    // Fallback 1: WordPress Madara direct AJAX chapters endpoint (/manga/<slug>/ajax/chapters/)
+    const allChapters = parseManhuausChaptersHtml(html, cleanSeriesUrl);
+
+    // Check if the series page has paginated chapter tabs (e.g. ?page=2 or ?cpage=2 up to 15 pages)
+    const pageNums = new Set();
+    const pageLinkRegex = /href=["']([^"']*(?:[?&](?:page|cpage|chapter_page)=(\d+))[^"']*)["']/gi;
+    let pm;
+    while ((pm = pageLinkRegex.exec(html)) !== null) {
+        const pNum = parseInt(pm[2], 10);
+        if (pNum > 1 && pNum <= 15 && !pageNums.has(pNum)) {
+            pageNums.add(pNum);
+            const rawHref = pm[1].replace(/&amp;/g, '&');
+            const pUrl = rawHref.startsWith('http')
+                ? rawHref
+                : rawHref.startsWith('?')
+                ? `${cleanSeriesUrl}${rawHref}`
+                : `${origin}${rawHref.startsWith('/') ? '' : '/'}${rawHref}`;
+            try {
+                const { html: subHtml } = await fetchHtmlWithFallback(pUrl);
+                const subChs = parseManhuausChaptersHtml(subHtml, cleanSeriesUrl);
+                for (const sc of subChs) {
+                    if (!allChapters.some(existing => existing.number === sc.number)) {
+                        allChapters.push(sc);
+                    }
+                }
+            } catch (_) {}
+        }
+    }
+
+    if (allChapters.length > 0) {
+        allChapters.sort((a, b) => (a.number || 0) - (b.number || 0));
+        return allChapters;
+    }
+
+    // Fallback 1: WordPress Madara direct AJAX chapters endpoint
     try {
         const ajaxUrl = `${cleanSeriesUrl}ajax/chapters/`;
         const ajaxRes = await fetch(ajaxUrl, {
@@ -666,18 +840,19 @@ export async function fetchManhuausChaptersWithAjax(targetUrl) {
         });
         if (ajaxRes.ok) {
             const ajaxHtml = await ajaxRes.text();
-            chapters = parseManhuausChaptersHtml(ajaxHtml);
+            const chapters = parseManhuausChaptersHtml(ajaxHtml, cleanSeriesUrl);
             if (chapters.length > 0) return chapters;
         }
     } catch (_) {}
 
     // Fallback 2: WordPress admin-ajax.php with manga_get_chapters action
     try {
-        const postIdMatch = html.match(/id=["']manga-chapters-holder["'][^>]+data-id=["'](\d+)["']/i) ||
-                            html.match(/var\s+manga\s*=\s*\{[^}]*["']manga_id["']\s*:\s*["']?(\d+)["']?/i);
+        const postIdMatch =
+            html.match(/id=["']manga-chapters-holder["'][^>]+data-id=["'](\d+)["']/i) ||
+            html.match(/var\s+manga\s*=\s*\{[^}]*["']manga_id["']\s*:\s*["']?(\d+)["']?/i);
         if (postIdMatch && postIdMatch[1]) {
             const body = new URLSearchParams({ action: 'manga_get_chapters', manga: postIdMatch[1] });
-            const wpRes = await fetch(`${MANHUAUS_BASE}/wp-admin/admin-ajax.php`, {
+            const wpRes = await fetch(`${origin}/wp-admin/admin-ajax.php`, {
                 method: 'POST',
                 headers: {
                     ...MU_HEADERS,
@@ -690,13 +865,13 @@ export async function fetchManhuausChaptersWithAjax(targetUrl) {
             });
             if (wpRes.ok) {
                 const wpHtml = await wpRes.text();
-                chapters = parseManhuausChaptersHtml(wpHtml);
+                const chapters = parseManhuausChaptersHtml(wpHtml, cleanSeriesUrl);
                 if (chapters.length > 0) return chapters;
             }
         }
     } catch (_) {}
 
-    return chapters;
+    return allChapters;
 }
 
 export const MANGAFIRE_API_BASE =
