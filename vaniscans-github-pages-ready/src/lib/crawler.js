@@ -247,7 +247,22 @@ export function parseMangaKatanaPagesHtml(html) {
 }
 
 export async function fetchHtmlWithFallback(targetUrl) {
-    // 1. Direct server-side fetch with MangaKatana headers first (fastest & most reliable on Node/Serverless)
+    // 1. Route HTML scrape through our Cloudflare Worker first so MangaKatana tokens match Cloudflare's Edge IP!
+    try {
+        const cfWorkerUrl = `https://vaniscans.online/api/proxy/img?mode=html&url=${encodeURIComponent(targetUrl)}`;
+        const cfRes = await fetch(cfWorkerUrl, {
+            cache: 'no-store',
+            signal: AbortSignal.timeout(10000)
+        });
+        if (cfRes.ok) {
+            const html = await cfRes.text();
+            if (html && html.length > 300 && !html.includes('Just a moment...')) {
+                return { html, finalUrl: targetUrl };
+            }
+        }
+    } catch (_) {}
+
+    // 2. Direct server-side fetch with MangaKatana headers
     try {
         const directRes = await fetch(targetUrl, {
             headers: MK_HEADERS,
@@ -263,7 +278,7 @@ export async function fetchHtmlWithFallback(targetUrl) {
         }
     } catch (_) {}
 
-    // 2. Fallback proxy relays if direct fetch is blocked
+    // 3. Fallback proxy relays if direct fetch is blocked
     const fetchCandidate = async (url, unwrapJson = false) => {
         const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -286,7 +301,6 @@ export async function fetchHtmlWithFallback(targetUrl) {
         fetchCandidate(`https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, false)
     ]);
 }
-
 
 export const MANGAFIRE_API_BASE =
     (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MANGAFIRE_API_URL) || process.env.MANGAFIRE_API_URL ||
