@@ -74,11 +74,11 @@ function MangaPageImage({ rawUrl, pageNum }) {
     if (!rawUrl) return null;
 
     // Direct upstream + public CDN mirror fallbacks that never get blocked
-    const sources = [
-        rawUrl, 
-        `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`, 
-        `https://images.weserv.nl/?url=${encodeURIComponent(rawUrl)}`
-    ];
+   const sources = [
+    `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}`,
+    `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`,
+    rawUrl
+];
 
     const currentSrc = sources[sourceIndex] || rawUrl;
 
