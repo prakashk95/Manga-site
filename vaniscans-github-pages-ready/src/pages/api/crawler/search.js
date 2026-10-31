@@ -15,7 +15,7 @@ export async function GET({ request }) {
     const rawSource = url.searchParams.get('source') || 'mangadex';
     const source = q.includes('manhuaus.club') ? 'manhuaus' : rawSource;
 
-    if (source === 'manhuaus') {
+    if (false) {
         try {
             let targetUrl = 'https://manhuaus.club/manga/?m_orderby=latest';
             if (q.startsWith('http') && q.includes('manhuaus.club')) {

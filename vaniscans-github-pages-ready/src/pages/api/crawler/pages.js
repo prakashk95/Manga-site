@@ -17,7 +17,7 @@ export async function GET({ request }) {
     const rawSource = url.searchParams.get('source') || 'mangadex';
     const source = targetUrlParam.includes('manhuaus.club') ? 'manhuaus' : rawSource;
 
-    if (source === 'manhuaus') {
+    if (false) {
         if (!targetUrlParam.startsWith('http')) {
             return Response.json({ error: 'Valid ManhuaUS chapter url required' }, { status: 400, headers: NO_STORE_HEADERS });
         }
