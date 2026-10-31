@@ -321,7 +321,8 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
 
     const pages = currentChapter.pages || [];
     const ads = monetization?.ads || {};
-    const activeChapterUrl = currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
+    const rawChUrl = currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
+    const activeChapterUrl = rawChUrl.startsWith('http') ? rawChUrl : `https://mangakatana.com${rawChUrl}`;
 
     return (
         <div className="min-h-screen bg-[#07080d] text-slate-100 flex flex-col select-none">
