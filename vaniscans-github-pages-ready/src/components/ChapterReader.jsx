@@ -1,7 +1,4 @@
-
-
 import React, { useState, useEffect } from 'react';
-
 
 import { mergeMonetization } from '@/lib/monetization';
 import {
@@ -54,13 +51,7 @@ function AdSlotBanner({ slot }) {
     return null;
 }
 
-/**
- * Multi-stage resilient page image component (matches original frontend/js/reader.js):
- * Stage 0: Loads direct upstream URL (`pageUrl`) with `referrerPolicy="no-referrer"` (unique URL per image, zero proxy caching collision!)
- * Stage 1: Falls back to `wsrv.nl` CDN proxy (`https://wsrv.nl/?url=...&output=webp`)
- * Stage 2: Falls back to `/api/proxy/img?p=${pageNum}&url=...` (with `no-store` & `Netlify-Vary: query`)
- */
-function MangaPageImage({ rawUrl, pageNum }) {
+function MangaPageImage({ rawUrl, pageNum, chapterUrl = '' }) {
     const [sourceIndex, setSourceIndex] = useState(0);
     const [loaded, setLoaded] = useState(false);
     const [failed, setFailed] = useState(false);
@@ -73,12 +64,12 @@ function MangaPageImage({ rawUrl, pageNum }) {
 
     if (!rawUrl) return null;
 
-    // Direct upstream + public CDN mirror fallbacks that never get blocked
-   const sources = [
-    `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}`,
-    `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`,
-    rawUrl
-];
+    const chParam = chapterUrl ? `&chapterUrl=${encodeURIComponent(chapterUrl)}` : '';
+    const sources = [
+        `/api/proxy/img?page=${pageNum}&url=${encodeURIComponent(rawUrl)}${chParam}`,
+        `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&output=webp`,
+        rawUrl
+    ];
 
     const currentSrc = sources[sourceIndex] || rawUrl;
 
@@ -100,11 +91,11 @@ function MangaPageImage({ rawUrl, pageNum }) {
                     alt={`Page ${pageNum}`}
                     loading={pageNum <= 3 ? "eager" : "lazy"}
                     decoding="async"
-                    referrerPolicy="no-referrer"
+                    referrerPolicy={sourceIndex === 0 ? "strict-origin-when-cross-origin" : "no-referrer"}
                     onLoad={() => setLoaded(true)}
                     onError={() => {
                         if (sourceIndex < sources.length - 1) {
-                            setSourceIndex(prev => prev + 1); // Automatically switches mirrors on the fly!
+                            setSourceIndex(prev => prev + 1);
                         } else {
                             setFailed(true);
                         }
@@ -233,17 +224,19 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                     });
                 }
             } catch (_) {}
-        } else if (needsRefresh && chapterObj.mangakatanaChapterUrl) {
+        } else if (needsRefresh && (chapterObj.mangakatanaChapterUrl || chapterObj.url)) {
+            const mkUrl = chapterObj.mangakatanaChapterUrl || chapterObj.url;
             try {
-                const res = await fetch(`/api/crawler/pages?source=mangakatana&url=${encodeURIComponent(chapterObj.mangakatanaChapterUrl)}`, { cache: 'no-store' });
-                const json = await res.json();
-                let freshPages = json.pages || [];
+                let freshPages = [];
+                const proxyRes = await fetch(`/api/proxy/img?mode=html&url=${encodeURIComponent(mkUrl)}`, { cache: 'no-store' });
+                if (proxyRes.ok) {
+                    const html = await proxyRes.text();
+                    freshPages = parseMangaKatanaPagesHtml(html);
+                }
                 if (freshPages.length === 0) {
-                    const proxyRes = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(chapterObj.mangakatanaChapterUrl)}`);
-                    if (proxyRes.ok) {
-                        const html = await proxyRes.text();
-                        freshPages = parseMangaKatanaPagesHtml(html);
-                    }
+                    const res = await fetch(`/api/crawler/pages?source=mangakatana&url=${encodeURIComponent(mkUrl)}`, { cache: 'no-store' });
+                    const json = await res.json();
+                    freshPages = json.pages || [];
                 }
                 if (freshPages.length > 0) {
                     chapterObj.pages = freshPages;
@@ -328,6 +321,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
 
     const pages = currentChapter.pages || [];
     const ads = monetization?.ads || {};
+    const activeChapterUrl = currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
 
     return (
         <div className="min-h-screen bg-[#07080d] text-slate-100 flex flex-col select-none">
@@ -379,7 +373,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                             const pageNum = idx + 1;
                             return (
                                 <React.Fragment key={`${currentChapter.id}-p-${pageNum}`}>
-                                    <MangaPageImage rawUrl={pageUrl} pageNum={pageNum} />
+                                    <MangaPageImage rawUrl={pageUrl} pageNum={pageNum} chapterUrl={activeChapterUrl} />
                                     {pageNum === 5 && <AdSlotBanner slot={ads.afterFifth} />}
                                     {pageNum === 10 && <AdSlotBanner slot={ads.afterTenth} />}
                                 </React.Fragment>
@@ -390,7 +384,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 ) : (
                     <div className="w-full flex flex-col items-center space-y-4">
                         {singlePageIndex === 0 && <AdSlotBanner slot={ads.beforeFirst} />}
-                        <MangaPageImage rawUrl={pages[singlePageIndex]} pageNum={singlePageIndex + 1} />
+                        <MangaPageImage rawUrl={pages[singlePageIndex]} pageNum={singlePageIndex + 1} chapterUrl={activeChapterUrl} />
                         {singlePageIndex + 1 === 5 && <AdSlotBanner slot={ads.afterFifth} />}
                         {singlePageIndex + 1 === 10 && <AdSlotBanner slot={ads.afterTenth} />}
                         {singlePageIndex + 1 === pages.length && <AdSlotBanner slot={ads.afterLast} />}
