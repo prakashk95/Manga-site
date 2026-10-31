@@ -1,5 +1,3 @@
-import { isCloudflareOrBlockedHtml } from '@/lib/crawler';
-
 export async function GET({ request }) {
     try {
         const url = new URL(request.url);
@@ -16,11 +14,9 @@ export async function GET({ request }) {
         if (
             source === 'manhuaus' ||
             targetUrl.includes('manhuaus') ||
-            chapterUrl.includes('manhuaus.')
+            chapterUrl.includes('manhuaus.club')
         ) {
-            referer = (targetUrl.includes('manhuaus.com') || chapterUrl.includes('manhuaus.com'))
-                ? 'https://manhuaus.com/'
-                : 'https://manhuaus.club/';
+            referer = 'https://manhuaus.club/';
         } else if (targetUrl.includes('mangadex.org')) {
             referer = 'https://mangadex.org/';
         } else if (source === 'mangafire' || targetUrl.includes('mangafire')) {
@@ -30,7 +26,7 @@ export async function GET({ request }) {
         if (mode === 'html') {
             const htmlRes = await fetch(targetUrl, {
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Referer': referer
@@ -43,9 +39,6 @@ export async function GET({ request }) {
                 return new Response('Upstream HTML fetch failed', { status: 502 });
             }
             const htmlText = await htmlRes.text();
-            if (isCloudflareOrBlockedHtml(htmlText)) {
-                return new Response('Upstream blocked by Cloudflare challenge', { status: 502 });
-            }
             return new Response(htmlText, {
                 status: 200,
                 headers: {
@@ -57,7 +50,7 @@ export async function GET({ request }) {
         }
 
         const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
             'Referer': referer
         };

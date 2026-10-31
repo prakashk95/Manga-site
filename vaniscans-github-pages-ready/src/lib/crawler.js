@@ -45,6 +45,15 @@ export function stripHtmlTags(str) {
         .trim();
 }
 
+function resolveManhuausOrigin(urlStr = '') {
+    try {
+        if (urlStr && urlStr.startsWith('http')) {
+            return new URL(urlStr).origin;
+        }
+    } catch (_) {}
+    return MANHUAUS_BASE;
+}
+
 function normalizeAssetUrl(raw = '', baseOrigin = MANHUAUS_BASE) {
     if (!raw || typeof raw !== 'string') return '';
     const trimmed = raw.trim().replace(/\\+\//g, '/');
@@ -57,14 +66,7 @@ function normalizeAssetUrl(raw = '', baseOrigin = MANHUAUS_BASE) {
 
 function extractBestImgUrl(imgTagHtml = '', baseOrigin = MANHUAUS_BASE) {
     if (!imgTagHtml) return '';
-    const attrNames = [
-        'data-src',
-        'data-lazy-src',
-        'data-cfsrc',
-        'data-original',
-        'data-full-url',
-        'src'
-    ];
+    const attrNames = ['data-src', 'data-lazy-src', 'data-cfsrc', 'data-original', 'data-full-url', 'src'];
     for (const attr of attrNames) {
         const m = imgTagHtml.match(new RegExp(`\\b${attr}=["']([^"']+)["']`, 'i'));
         if (m && m[1]) {
@@ -149,7 +151,6 @@ export async function formatMangaDexSearchData(rawList = []) {
 export function parseMangaKatanaHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
     const results = [];
     if (!html) return results;
-
     if (html.includes('id="single_book"') || html.includes("id='single_book'")) {
         const titleMatch = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
         const coverMatch = html.match(/<div[^>]*class="[^"]*div_cover[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i) ||
@@ -315,19 +316,6 @@ export function parseMangaKatanaPagesHtml(html) {
     return fallbackUrls;
 }
 
-// ============================================================================
-// MANHUAUS.CLUB & MANHUAUS.COM SCRAPER FUNCTIONS (V6 ROBUST ANCHOR SCANNER)
-// ============================================================================
-
-function resolveManhuausOrigin(urlStr = '') {
-    try {
-        if (urlStr && urlStr.startsWith('http')) {
-            return new URL(urlStr).origin;
-        }
-    } catch (_) {}
-    return MANHUAUS_BASE;
-}
-
 export function parseManhuausHtmlSearch(html, finalUrl = '', fallbackQuery = '') {
     const results = [];
     if (!html || isCloudflareOrBlockedHtml(html)) return results;
@@ -489,7 +477,7 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
 
     const origin = resolveManhuausOrigin(seriesUrl);
 
-    // Universal anchor scanner for ManhuaUS / WordPress Madara / custom themes
+    // Bulletproof universal chapter scanner
     const aRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
 
@@ -504,18 +492,17 @@ export function parseManhuausChaptersHtml(html, seriesUrl = '') {
             ? cleanHref
             : `${origin}${cleanHref.startsWith('/') ? '' : '/'}${cleanHref}`;
 
-        // Skip pagination and external domains
         if (
             /\/manga\/page\/\d+/i.test(fullUrl) ||
             /[?&](?:page|cpage|m_orderby|s)=/i.test(fullUrl) ||
-            \/about|\/privacy|\/terms|\/dmca|\/contact\/?$/i.test(fullUrl) ||
+            /\/about|\/privacy|\/terms|\/dmca|\/contact\/?$/i.test(fullUrl) ||
             !fullUrl.includes(new URL(origin).hostname)
         ) {
             continue;
         }
 
         const text = stripHtmlTags(match[2]);
-        const cleanPath = fullUrl.replace(/[?#].*$/, '').replace(/\+$/, '');
+        const cleanPath = fullUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
         const lastSeg = cleanPath.split('/').pop() || '';
 
         const isChapterPath = /chapter|ch[-_]?\d+|ep[-_]?\d+|\b\d+(?:\.\d+)?\b/i.test(cleanPath);
@@ -591,7 +578,6 @@ export function parseManhuausPagesHtml(html, chapterUrl = '') {
         }
     };
 
-    // 1. Check preloaded JS arrays first
     const preloadedMatch =
         html.match(/chapter_preloaded_images\s*=\s*(\[[\s\S]*?\])\s*;/i) ||
         html.match(/["']images["']\s*:\s*(\[\s*["'](?:https?:)?\/\/[\s\S]*?\])/i) ||
@@ -605,7 +591,6 @@ export function parseManhuausPagesHtml(html, chapterUrl = '') {
         if (pages.length >= 2) return pages;
     }
 
-    // 2. Scoped reader container if available
     const containerRegexes = [
         /<div[^>]*class="[^"]*\b(?:reading-content|chapter-content|reader-area|reader-content|chapter-images|vung-doc|container-chapter-reader)\b[^"]*"[^>]*>([\s\S]*?)<(?:footer|div[^>]*class="[^"]*(?:entry-header|c-blog-post|wp-manga-nav|comments|discussion))/i,
         /<div[^>]*id="[^"]*(?:readerarea|chapter-reader|reading-content|images-content)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
@@ -631,7 +616,6 @@ export function parseManhuausPagesHtml(html, chapterUrl = '') {
         if (pages.length > 0) return pages;
     }
 
-    // 3. Full-document fallback for custom readers without legacy Madara classes
     const bodyHtml = html
         .replace(/<header[\s\S]*?<\/header>/gi, '')
         .replace(/<nav[\s\S]*?<\/nav>/gi, '')
@@ -655,7 +639,6 @@ export async function fetchHtmlWithFallback(targetUrl) {
         ? { ...MU_HEADERS, Referer: resolveManhuausOrigin(targetUrl) + '/' }
         : MK_HEADERS;
 
-    // 1. Direct server-side fetch
     try {
         const directRes = await fetch(targetUrl, {
             headers: primaryHeaders,
@@ -671,7 +654,6 @@ export async function fetchHtmlWithFallback(targetUrl) {
         }
     } catch (_) {}
 
-    // 2. Sequential proxy relays with Cloudflare challenge filtering
     const relays = [
         { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, json: true },
         { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, json: false },
@@ -702,7 +684,7 @@ export async function fetchHtmlWithFallback(targetUrl) {
     }
 
     throw new Error(
-        `Upstream source (${isManhuaus ? 'ManhuaUS' : 'target site'}) blocked automated server/proxy requests with Cloudflare 403. Use the "Paste Page HTML" option below or search MangaDex/MangaFire.`
+        `Upstream source (${isManhuaus ? 'ManhuaUS' : 'target site'}) blocked automated requests with Cloudflare 403. Use the "Paste Page HTML" option below.`
     );
 }
 
@@ -713,7 +695,6 @@ export async function fetchManhuausChaptersWithAjax(targetUrl) {
 
     const allChapters = parseManhuausChaptersHtml(html, cleanSeriesUrl);
 
-    // Check if the series page has paginated chapter tabs (up to 15 pages)
     const pageNums = new Set();
     const pageLinkRegex = /href=["']([^"']*(?:[?&](?:page|cpage|chapter_page)=(\d+))[^"']*)["']/gi;
     let pm;
@@ -744,7 +725,6 @@ export async function fetchManhuausChaptersWithAjax(targetUrl) {
         return allChapters;
     }
 
-    // Fallback 1: WordPress Madara direct AJAX chapters endpoint
     try {
         const ajaxUrl = `${cleanSeriesUrl}ajax/chapters/`;
         const ajaxRes = await fetch(ajaxUrl, {
@@ -763,7 +743,6 @@ export async function fetchManhuausChaptersWithAjax(targetUrl) {
         }
     } catch (_) {}
 
-    // Fallback 2: WordPress admin-ajax.php with manga_get_chapters action
     try {
         const postIdMatch =
             html.match(/id=["']manga-chapters-holder["'][^>]+data-id=["'](\d+)["']/i) ||

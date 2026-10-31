@@ -224,7 +224,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                     });
                 }
             } catch (_) {}
-        } else if (needsRefresh && (chapterObj.manhuausChapterUrl || (chapterObj.url && chapterObj.url.includes('manhuaus.')))) {
+        } else if (needsRefresh && (chapterObj.manhuausChapterUrl || (chapterObj.url && chapterObj.url.includes('manhuaus.club')))) {
             const rawMuUrl = chapterObj.manhuausChapterUrl || chapterObj.url;
             const muUrl = rawMuUrl.startsWith('http') ? rawMuUrl : `https://manhuaus.club${rawMuUrl.startsWith('/') ? '' : '/'}${rawMuUrl}`;
             try {
@@ -232,7 +232,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 const proxyRes = await fetch(`/api/proxy/img?mode=html&source=manhuaus&url=${encodeURIComponent(muUrl)}`, { cache: 'no-store' });
                 if (proxyRes.ok) {
                     const html = await proxyRes.text();
-                    freshPages = parseManhuausPagesHtml(html, muUrl);
+                    freshPages = parseManhuausPagesHtml(html);
                 }
                 if (freshPages.length === 0) {
                     const res = await fetch(`/api/crawler/pages?source=manhuaus&url=${encodeURIComponent(muUrl)}`, { cache: 'no-store' });

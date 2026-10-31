@@ -13,7 +13,6 @@ import {
     deleteLocalChapter
 } from '@/lib/clientStorage';
 import {
-    isCloudflareOrBlockedHtml,
     parseMangaKatanaHtmlSearch,
     parseMangaKatanaChaptersHtml,
     parseMangaKatanaPagesHtml,
@@ -69,8 +68,6 @@ export default function AdminPanelPage() {
     const [crawlChapterFilter, setCrawlChapterFilter] = useState('');
     const [crawlLoading, setCrawlLoading] = useState(false);
     const [crawlProgress, setCrawlProgress] = useState('');
-    const [manualHtmlInput, setManualHtmlInput] = useState('');
-    const [showManualHtmlBox, setShowManualHtmlBox] = useState(false);
 
     // Bulk ZIP state
     const [zipSeriesId, setZipSeriesId] = useState('');
@@ -317,71 +314,26 @@ export default function AdminPanelPage() {
         }
     };
 
-    // Safe sequential client-side proxy fallback (replaces aggregate promise crash)
+    // Client-side proxy fallback helper if serverless IP is blocked by MangaKatana/MangaDex
     const fetchClientHtmlFallback = async (targetUrl) => {
-        const relays = [
-            { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, unwrap: true },
-            { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, unwrap: false },
-            { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, unwrap: false },
-            { url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, unwrap: false }
-        ];
-
-        for (const relay of relays) {
-            try {
-                const r = await fetch(relay.url, { signal: AbortSignal.timeout(10000) });
-                if (!r.ok) continue;
-                if (relay.unwrap) {
-                    const j = await r.json();
-                    if (j && typeof j.contents === 'string' && !isCloudflareOrBlockedHtml(j.contents)) {
-                        return j.contents;
-                    }
-                } else {
-                    const t = await r.text();
-                    if (!isCloudflareOrBlockedHtml(t)) {
-                        return t;
-                    }
-                }
-            } catch (_) {}
-        }
-
-        throw new Error(
-            'Cloudflare blocked automated server & proxy requests for this URL. Use the "Paste Page HTML" box below to parse the open tab directly.'
-        );
-    };
-
-    const handleParseManualHtml = () => {
-        if (!manualHtmlInput.trim()) {
-            showToast('Paste the page HTML source (Ctrl+U) first', 'error');
-            return;
-        }
-        const q = searchQuery.trim();
-        const isKatana = crawlerSource === 'mangakatana' || q.includes('mangakatana.com');
-        const parsedSeries = isKatana
-            ? parseMangaKatanaHtmlSearch(manualHtmlInput, q, q)
-            : parseManhuausHtmlSearch(manualHtmlInput, q, q);
-
-        const parsedChs = isKatana
-            ? parseMangaKatanaChaptersHtml(manualHtmlInput)
-            : parseManhuausChaptersHtml(manualHtmlInput, q);
-
-        setCrawlerWorkspace(true);
-        if (parsedSeries.length > 0) {
-            setScannedResults(parsedSeries);
-            if (parsedSeries.length === 1 && parsedChs.length > 0) {
-                setSelectedMangaToCrawl(parsedSeries[0]);
-                setCrawledChaptersList(parsedChs);
-                const initialSelected = {};
-                parsedChs.forEach(c => { initialSelected[c.id || c.url] = true; });
-                setSelectedChapterKeys(initialSelected);
-                setScannerStatus(`Parsed "${parsedSeries[0].title}" with ${parsedChs.length} chapters from pasted HTML!`);
-                setManualHtmlInput('');
-                return;
+        const tryProxy = async (url, unwrap = false) => {
+            const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            if (unwrap) {
+                const j = await r.json();
+                if (j && typeof j.contents === 'string' && j.contents.length > 200) return j.contents;
+                throw new Error('Empty');
             }
-            setScannerStatus(`Parsed ${parsedSeries.length} series from pasted HTML.`);
-            setManualHtmlInput('');
-        } else {
-            showToast('Could not detect series metadata in pasted HTML.', 'error');
-        }
+            const t = await r.text();
+            if (t && t.length > 200) return t;
+            throw new Error('Empty');
+        };
+        return await Promise.any([
+            tryProxy(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, false),
+            tryProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, false),
+            tryProxy(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, true),
+            tryProxy(`https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, false)
+        ]);
     };
 
     // Tab 3: Crawler Search & Chapter Selector
@@ -390,9 +342,9 @@ export default function AdminPanelPage() {
         if (presetQuery !== null) setSearchQuery(presetQuery);
 
         let activeSrc = forceSource || crawlerSource;
-        if (q.includes('manhuaus.')) activeSrc = 'manhuaus';
+        if (q.includes('manhuaus.club')) activeSrc = 'manhuaus';
         else if (q.includes('mangakatana.com')) activeSrc = 'mangakatana';
-        if (forceSource || q.includes('manhuaus.') || q.includes('mangakatana.com')) {
+        if (forceSource || q.includes('manhuaus.club') || q.includes('mangakatana.com')) {
             setCrawlerSource(activeSrc);
         }
 
@@ -413,17 +365,15 @@ export default function AdminPanelPage() {
         setCrawledChaptersList([]);
 
         try {
-            let serverErr = '';
             const res = await fetch(`/api/crawler/search?q=${encodeURIComponent(q)}&source=${activeSrc}`);
             const json = await res.json();
-            if (!res.ok && json?.error) serverErr = json.error;
             let list = Array.isArray(json?.data) ? json.data : [];
 
             // Client-side fallback if serverless container returned 0 results
             if (list.length === 0) {
                 if (activeSrc === 'manhuaus') {
                     let targetUrl = 'https://manhuaus.club/manga/?m_orderby=latest';
-                    if (q.startsWith('http') && q.includes('manhuaus.')) targetUrl = q;
+                    if (q.startsWith('http') && q.includes('manhuaus.club')) targetUrl = q;
                     else if (q) targetUrl = `https://manhuaus.club/?s=${encodeURIComponent(q)}&post_type=wp-manga`;
                     const html = await fetchClientHtmlFallback(targetUrl);
                     list = parseManhuausHtmlSearch(html, targetUrl, q);
@@ -458,12 +408,11 @@ export default function AdminPanelPage() {
             setScannedResults(list);
             setScannerStatus(
                 list.length > 0
-                    ? `Found ${list.length} series on ${sourceLabel} — Click "View Chapters & Select to Pull" on any series below.`
-                    : (serverErr || `No series matched "${q}". Try another keyword or switch source.`)
+                    ? `Found ${list.length} series on ${sourceLabel} — Click "View Chapters & Select" on any series below.`
+                    : `No series matched "${q}". Try another keyword or switch source.`
             );
         } catch (err) {
-            setShowManualHtmlBox(activeSrc === 'manhuaus' || activeSrc === 'mangakatana');
-            setScannerStatus(err.message);
+            setScannerStatus(`Crawler error: ${err.message}`);
         } finally {
             setIsScanning(false);
         }
@@ -498,7 +447,7 @@ export default function AdminPanelPage() {
                         ? item.manhuausUrl
                         : `https://manhuaus.club/manga/${(item.manhuausId || '').replace(/^\/+|\/+$/g, '')}/`;
                     const html = await fetchClientHtmlFallback(cleanUrl);
-                    list = parseManhuausChaptersHtml(html, cleanUrl);
+                    list = parseManhuausChaptersHtml(html);
                 } else if (isMangaFire) {
                     list = await fetchMangaFireChapters(item.mangafireId, crawlerLang);
                 } else if (isKatana) {
@@ -622,7 +571,7 @@ export default function AdminPanelPage() {
                     if (isManhuaus && ch.url) {
                         try {
                             const html = await fetchClientHtmlFallback(ch.url);
-                            pages = parseManhuausPagesHtml(html, ch.url);
+                            pages = parseManhuausPagesHtml(html);
                             pagesSaver = pages;
                         } catch (_) {}
                     } else if (isMangaFire && (ch.mangafireChapterId || ch.id)) {
@@ -1278,44 +1227,6 @@ export default function AdminPanelPage() {
                                     </button>
                                 </div>
                             </div>
-
-                            {(crawlerSource === 'manhuaus' || crawlerSource === 'mangakatana') && (
-                                <div className="bg-[#16192b] border border-[#292d4b] rounded-2xl p-4 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold text-pink-300">
-                                            🛡️ Cloudflare 403 Bypass (Paste Page Source HTML)
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowManualHtmlBox(!showManualHtmlBox)}
-                                            className="text-xs font-bold text-purple-400 hover:underline"
-                                        >
-                                            {showManualHtmlBox ? 'Hide Box' : 'Open HTML Paste Box'}
-                                        </button>
-                                    </div>
-                                    {showManualHtmlBox && (
-                                        <div className="space-y-2">
-                                            <p className="text-[11px] text-slate-400">
-                                                If Cloudflare blocks server scraping on ManhuaUS, open the series page in your browser, press Ctrl+U (View Source), copy all HTML, and paste it below:
-                                            </p>
-                                            <textarea
-                                                rows="4"
-                                                value={manualHtmlInput}
-                                                onChange={e => setManualHtmlInput(e.target.value)}
-                                                placeholder="Paste raw page HTML source here..."
-                                                className="w-full bg-[#121422] border border-[#292d4b] rounded-xl p-3 text-xs text-white font-mono"
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={handleParseManualHtml}
-                                                className="px-4 py-2 bg-pink-600 hover:bg-pink-500 text-white rounded-xl text-xs font-black uppercase tracking-wider"
-                                            >
-                                                Parse Series & Chapters from HTML
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
 
                             {crawlerWorkspace && (
                                 <div className="space-y-4 pt-4 border-t border-[#1f2337]">
