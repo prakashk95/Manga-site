@@ -65,7 +65,7 @@ function MangaPageImage({ rawUrl, pageNum, chapterUrl = '' }) {
     const [failed, setFailed] = useState(false);
     const wrapRef = useRef(null);
     // Start loading a page when it is within ~3 screens of the viewport (native lazy-load starts too late)
-    const [near, setNear] = useState(pageNum <= 4);
+    const [near, setNear] = useState(true);
 
     useEffect(() => {
         if (near) return;
