@@ -1,6 +1,10 @@
+import * as cheerio from 'cheerio';
+
 const USER_AGENT = 'VaniScans/5.0 (+https://vaniscans.online)';
 const MANGAKATANA_BASE = 'https://mangakatana.com';
 export const COMIX_BASE = 'https://comix.to';
+export const MGEKO_BASE = 'https://www.mgeko.cc';
+
 
 export const MK_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -16,6 +20,13 @@ export const COMIX_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
     'Referer': 'https://comix.to/'
+};
+
+export const MGEKO_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.mgeko.cc/'
 };
 
 export function isCloudflareOrBlockedHtml(html = '') {
@@ -285,15 +296,13 @@ export function parseMangaKatanaPagesHtml(html) {
 }
 
 export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
-    const headersToUse = customHeaders || (targetUrl.includes('comix.to') ? COMIX_HEADERS : MK_HEADERS);
-
-    // Try direct fetch first
+    const headersToUse = customHeaders || (targetUrl.includes('mgeko.cc') ? MGEKO_HEADERS : targetUrl.includes('comix.to') ? COMIX_HEADERS : MK_HEADERS);
     try {
         const directRes = await fetch(targetUrl, {
             headers: headersToUse,
             redirect: 'follow',
             cache: 'no-store',
-            signal: AbortSignal.timeout(8000)
+            signal: AbortSignal.timeout(9000)
         });
         if (directRes.ok) {
             const html = await directRes.text();
@@ -303,20 +312,17 @@ export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
         }
     } catch (_) {}
 
-    // Add more proxy relays to bypass Cloudflare bot detection
     const relays = [
         { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, json: true },
         { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, json: false },
-        { url: `https://r.jina.ai/${targetUrl}`, json: false },
-        { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, json: false },
-        { url: `https://cors-anywhere.herokuapp.com/${targetUrl}`, json: false }
+        { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, json: false }
     ];
 
     for (const relay of relays) {
         try {
             const res = await fetch(relay.url, {
                 cache: 'no-store',
-                signal: AbortSignal.timeout(12000)
+                signal: AbortSignal.timeout(10000)
             });
             if (!res.ok) continue;
 
@@ -327,15 +333,14 @@ export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
                 }
             } else {
                 const text = await res.text();
-                // If it's from Jina, it might be markdown but still contains the data we need
-                if (!isCloudflareOrBlockedHtml(text) || relay.url.includes('jina.ai')) {
+                if (!isCloudflareOrBlockedHtml(text)) {
                     return { html: text, finalUrl: targetUrl };
                 }
             }
         } catch (_) {}
     }
 
-    throw new Error('Upstream host blocked automated requests.');
+    throw new Error('Upstream source blocked automated requests.');
 }
 
 // ============================================================================
@@ -385,49 +390,8 @@ export function parseComixHtmlSearch(html = '', finalUrl = '', fallbackQuery = '
 
     // 2. Parse search result cards (.item, .comic-item, .card, div.grid > div)
     const seenUrls = new Set();
-    // The search page for /?s= might return initial-data, but if it renders HTML, it might be different.
-    // The previous parsing logic might need to be adjusted if the HTML structure changed.
     const cardBlocks = html.split(/<div[^>]+class="[^"]*(?:\bitem\b|comic-item|\bcard\b)[^"]*"[^>]*>/i).slice(1);
     const blocksToScan = cardBlocks.length > 0 ? cardBlocks : html.split(/<a[^>]+href=["'](?=\/?(?:comic|manga|series|title)\/)/i).slice(1);
-
-    // Fallback: search for data in initial-data script tag as well
-    const m = html.match(/<script[^>]*id="initial-data"[^>]*>([\s\S]*?)<\/script>/i);
-    if (m) {
-        try {
-            const data = JSON.parse(m[1]);
-            if (data.queries) {
-                for (const key in data.queries) {
-                    const q = JSON.parse(key);
-                    // Search query results: ["manga","search",{"q":"query",...}]
-                    const isSearchQuery = q[0] === 'manga' && q[1] === 'search';
-                    const isHotList = q[0] === 'manga' && q[1] === 'list' && q[2]?.scope === 'hot';
-
-                    if (isSearchQuery || isHotList) {
-                        const items = (data.queries[key].items || data.queries[key]) || [];
-                        const finalItems = Array.isArray(items) ? items : (items.items || []);
-
-                        for (const item of finalItems) {
-                            const mangaUrl = `${COMIX_BASE}/title/${item.hid}`;
-                            if (seenUrls.has(mangaUrl)) continue;
-                            seenUrls.add(mangaUrl);
-                            results.push({
-                                comixId: item.hid,
-                                comixUrl: mangaUrl,
-                                sourceHost: 'comix.to',
-                                title: item.title,
-                                author: 'Comix.to',
-                                cover: item.poster?.medium || 'https://placehold.co/400x600/1a1d30/3b82f6?text=Comix.to',
-                                genres: ['Action', 'Comic'],
-                                status: item.status === 'releasing' ? 'Ongoing' : 'Completed',
-                                rating: '9.6',
-                                synopsis: item.synopsis || `Imported from Comix.to (${item.title}).`
-                            });
-                        }
-                    }
-                }
-            }
-        } catch(e) {}
-    }
 
     for (const block of blocksToScan) {
         const titleElMatch =
@@ -473,47 +437,8 @@ export function parseComixChaptersHtml(html = '') {
     const seenUrls = new Set();
     if (!html) return rawChapters;
 
-    // First try to extract from initial-data if it's there
-    const m = html.match(/<script[^>]*id="initial-data"[^>]*>([\s\S]*?)<\/script>/i);
-    if (m) {
-        try {
-            const data = JSON.parse(m[1]);
-            // Extract the first and latest chapter URLs if available in the detail data
-            for (const key in data.queries) {
-                if (key.includes('"manga","detail"')) {
-                    const detail = data.queries[key];
-                    if (detail.firstChapterUrl) {
-                        const url = detail.firstChapterUrl.startsWith('http') ? detail.firstChapterUrl : `${COMIX_BASE}${detail.firstChapterUrl}`;
-                        if (!seenUrls.has(url)) {
-                            seenUrls.add(url);
-                            rawChapters.push({
-                                id: url.split('/').pop(),
-                                url: url,
-                                title: 'First Chapter',
-                                parsedNum: 1
-                            });
-                        }
-                    }
-                    if (detail.latestChapterUrl) {
-                        const url = detail.latestChapterUrl.startsWith('http') ? detail.latestChapterUrl : `${COMIX_BASE}${detail.latestChapterUrl}`;
-                        if (!seenUrls.has(url)) {
-                            seenUrls.add(url);
-                            rawChapters.push({
-                                id: url.split('/').pop(),
-                                url: url,
-                                title: `Chapter ${detail.latestChapter || 'Latest'}`,
-                                parsedNum: detail.latestChapter ? parseFloat(detail.latestChapter) : null
-                            });
-                        }
-                    }
-                }
-            }
-        } catch(e) {}
-    }
-
     // Matches #chapter-list li a, .chapters-list a, ul.list-none li a, .chapter-item
-    // Updated to handle /title/slug/{chapter-slug} format
-    const aRegex = /<a[^>]+href=["'](\/title\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const aRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
 
     while ((match = aRegex.exec(html)) !== null) {
@@ -521,16 +446,20 @@ export function parseComixChaptersHtml(html = '') {
         const rawTitle = stripHtmlTags(match[2]);
         if (!chUrl || chUrl === '#' || chUrl.startsWith('javascript:')) continue;
 
-        // Ensure it's a chapter link (contains both a slug and a chapter identifier)
-        const parts = chUrl.split('/').filter(Boolean);
-        if (parts.length < 3 || !/chapter/i.test(chUrl)) continue;
+        const looksLikeChapter =
+            /chapter|ch[.-]?\d+|ep[.-]?\d+|\/read\/|\/chapter/i.test(chUrl) ||
+            /chapter|ch\.?\s*\d+|episode/i.test(rawTitle);
+        if (!looksLikeChapter) continue;
 
         if (chUrl.startsWith('/')) chUrl = `${COMIX_BASE}${chUrl}`;
         if (!chUrl.startsWith('http') || seenUrls.has(chUrl)) continue;
         seenUrls.add(chUrl);
 
-        const chSlug = parts.pop();
-        const numMatch = chSlug.match(/(\d+(?:\.\d+)?)/) || rawTitle.match(/(\d+(?:\.\d+)?)/);
+        const chSlug = chUrl.replace(/\/+$/, '').split('/').pop() || `ch-${rawChapters.length + 1}`;
+        const numMatch =
+            rawTitle.match(/chapter\s*(\d+(?:\.\d+)?)/i) ||
+            chSlug.match(/(?:chapter|ch)[-_]?(\d+(?:\.\d+)?)/i) ||
+            rawTitle.match(/(\d+(?:\.\d+)?)/);
         const parsedNum = numMatch ? parseFloat(numMatch[1]) : null;
 
         rawChapters.push({
@@ -541,12 +470,7 @@ export function parseComixChaptersHtml(html = '') {
         });
     }
 
-    // Sort chapters by number if possible, then reverse to match expected order
-    rawChapters.sort((a, b) => {
-        if (a.parsedNum !== null && b.parsedNum !== null) return a.parsedNum - b.parsedNum;
-        return 0;
-    });
-
+    rawChapters.reverse();
     const finalChapters = [];
     const seenNumbers = new Set();
 
@@ -603,8 +527,7 @@ export function parseComixPagesHtml(html = '') {
 
 export async function fetchComixSearch(query = '') {
     const cleanQ = (query || '').trim();
-    // The previous URL was /search?q= which now 404s. Using /?s=
-    let targetUrl = `${COMIX_BASE}/?s=${encodeURIComponent(cleanQ)}`;
+    let targetUrl = `${COMIX_BASE}/search?q=${encodeURIComponent(cleanQ)}`;
     if (cleanQ.startsWith('http') && cleanQ.includes('comix.to')) {
         targetUrl = cleanQ;
     } else if (cleanQ && !cleanQ.includes(' ') && cleanQ.includes('/comic/')) {
@@ -617,16 +540,15 @@ export async function fetchComixSearch(query = '') {
 
 export async function fetchComixChapters(urlOrSlug = '') {
     const clean = (urlOrSlug || '').trim();
-    // New pattern: /title/{hid}
-    const slug = clean.replace(/^\/+|\/+$/g, '').replace(/^comic\//i, '').replace(/^title\//i, '').split('?')[0];
-    const targetUrl = `${COMIX_BASE}/title/${slug}`;
+    const targetUrl = clean.startsWith('http')
+        ? clean
+        : `${COMIX_BASE}/comic/${clean.replace(/^\/+|\/+$/g, '').replace(/^comic\//i, '')}`;
     const { html } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
     return parseComixChaptersHtml(html);
 }
 
 export async function fetchComixPages(chapterUrl = '') {
     const clean = (chapterUrl || '').trim();
-    // For reading, it might be /title/{hid}/{chapter-slug}
     const targetUrl = clean.startsWith('http')
         ? clean
         : `${COMIX_BASE}${clean.startsWith('/') ? '' : '/'}${clean}`;
@@ -637,7 +559,7 @@ export async function fetchComixPages(chapterUrl = '') {
 export const MANGAFIRE_API_BASE =
     (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.PUBLIC_MANGAFIRE_API_URL || import.meta.env.MANGAFIRE_API_URL)) ||
     (typeof process !== 'undefined' && process.env && (process.env.PUBLIC_MANGAFIRE_API_URL || process.env.MANGAFIRE_API_URL)) ||
-    'https://mangafire-api.fly.dev'; // Switched to a public hosted instance instead of localhost
+    'http://localhost:3001/api';
 
 export async function fetchMangaFireSearch(query = '', page = 1) {
     const baseUrl = MANGAFIRE_API_BASE.replace(/\/+$/, '');
@@ -762,4 +684,362 @@ export async function fetchMangaFirePages(chapterId) {
     return rawImages
         .map(img => (typeof img === 'string' ? img : img?.url || img?.img || img?.src || ''))
         .filter(Boolean);
+}
+
+
+// ============================================================================
+// MGEKO.CC SCRAPER FUNCTIONS (Powered by Cheerio)
+// ============================================================================
+
+export function parseMgekoHtmlSearch(html = '', finalUrl = '', fallbackQuery = '') {
+    const results = [];
+    if (!html) return results;
+
+    let cleanHtml = html;
+    try {
+        const parsedJson = JSON.parse(html);
+        if (typeof parsedJson === 'string') {
+            cleanHtml = parsedJson;
+        } else if (parsedJson && typeof parsedJson.results_html === 'string') {
+            cleanHtml = parsedJson.results_html;
+        } else if (parsedJson && typeof parsedJson.html === 'string') {
+            cleanHtml = parsedJson.html;
+        } else if (Array.isArray(parsedJson)) {
+            for (const item of parsedJson) {
+                const title = item.title || item.name || item.value || item.label || '';
+                let url = item.url || item.href || item.link || (item.slug ? `/manga/${item.slug}/` : '');
+                if (!title || !url) continue;
+                if (url.startsWith('/')) url = `${MGEKO_BASE}${url}`;
+                const slug = url.replace(/\/+$/, '').split('/').pop() || `mg-${results.length + 1}`;
+                const cover = normalizeAssetUrl(item.cover || item.image || item.img || item.thumb || '', MGEKO_BASE);
+                results.push({
+                    mgekoId: slug,
+                    mgekoUrl: url,
+                    sourceHost: 'mgeko.cc',
+                    title: stripHtmlTags(title),
+                    author: item.author || 'Mgeko Creator',
+                    cover: cover || 'https://placehold.co/400x600/1a1d30/ec4899?text=Mgeko.cc',
+                    genres: ['Action', 'Manga'],
+                    status: 'Ongoing',
+                    rating: '9.6',
+                    synopsis: item.synopsis || item.description || `Imported from Mgeko.cc (${stripHtmlTags(title)}).`
+                });
+            }
+            if (results.length > 0) return results;
+        }
+    } catch (_) {}
+
+    const $ = cheerio.load(cleanHtml);
+
+    // 1. Check if single manga detail page (e.g., https://www.mgeko.cc/manga/solo-leveling-mg1/)
+    const isDetailPage =
+        (finalUrl && /\/manga\/[^/?#]+/i.test(finalUrl) && !/\/search/i.test(finalUrl)) ||
+        ($('h1.novel-title, .novel-header h1, #novel .novel-title').length > 0 && $('.novel-item').length === 0);
+
+    if (isDetailPage) {
+        const title =
+            $('h1.novel-title, .novel-header h1, h1.main-title, h1').first().text().trim() ||
+            $('meta[property="og:title"]').attr('content')?.replace(/\s*-\s*Mgeko.*$/i, '').trim() ||
+            fallbackQuery ||
+            'Mgeko Series';
+
+        const author =
+            $('.author span[itemprop="author"], .author a, .novel-info .author').first().text().replace(/^Author\(S\)\s*:\s*/i, '').trim() ||
+            'Mgeko Creator';
+
+        const rawCover =
+            $('figure.cover img, .novel-cover img, .fixed-img img').first().attr('data-src') ||
+            $('figure.cover img, .novel-cover img, .fixed-img img').first().attr('src') ||
+            $('meta[property="og:image"]').attr('content') ||
+            '';
+        const cover = normalizeAssetUrl(rawCover, MGEKO_BASE);
+
+        const synopsis =
+            $('.summary .content, .description, #info .summary p, .novel-body .summary').first().text().trim() ||
+            $('meta[property="og:description"]').attr('content')?.trim() ||
+            `Imported directly from Mgeko.cc (${title}).`;
+
+        const genres = [];
+        $('.categories ul li a, .genres a, a[href*="/tag/"], a[href*="/genre/"]').each((_, el) => {
+            const g = $(el).text().trim();
+            if (g && genres.length < 4 && !genres.includes(g)) genres.push(g);
+        });
+
+        const statusText = $('.header-stats, .novel-info').text();
+        const status = /completed/i.test(statusText) ? 'Completed' : 'Ongoing';
+
+        const ogUrl = $('meta[property="og:url"]').attr('content') || finalUrl || '';
+        const cleanUrl = ogUrl.replace(/\/all-chapters\/?$/i, '/');
+        const slug = cleanUrl.split('/manga/')[1]?.replace(/\/+$/, '').split('/')[0] || `mg-${Date.now()}`;
+        const mgekoUrl = cleanUrl.startsWith('http') ? cleanUrl : `${MGEKO_BASE}/manga/${slug}/`;
+
+        results.push({
+            mgekoId: slug,
+            mgekoUrl,
+            sourceHost: 'mgeko.cc',
+            title,
+            author,
+            cover: cover || 'https://placehold.co/400x600/1a1d30/ec4899?text=Mgeko.cc',
+            genres: genres.length > 0 ? genres : ['Action', 'Manga'],
+            status,
+            rating: '9.6',
+            synopsis
+        });
+        return results;
+    }
+
+    // 2. Parse search result cards using Cheerio
+    const seenUrls = new Set();
+    const cardSelector = 'li.novel-item, .novel-list .novel-item, .manga-item, .search-result-item, .comic-card';
+    const items = $(cardSelector);
+
+    if (items.length > 0) {
+        items.each((_, el) => {
+            const $el = $(el);
+            const $link = $el.find('a[href*="/manga/"]').first().length
+                ? $el.find('a[href*="/manga/"]').first()
+                : $el.find('a').first();
+
+            let href = ($link.attr('href') || '').trim();
+            if (!href || href === '#') return;
+            if (href.startsWith('/')) href = `${MGEKO_BASE}${href}`;
+            if (!href.startsWith('http')) return;
+            href = href.replace(/\/all-chapters\/?$/i, '/');
+            if (seenUrls.has(href)) return;
+
+            const title = (
+                $el.find('.novel-title, h4, h3, .title, .manga-title').first().text().trim() ||
+                $link.attr('title') ||
+                $link.text().trim()
+            );
+            if (!title) return;
+            seenUrls.add(href);
+
+            const slug = href.split('/manga/')[1]?.replace(/\/+$/, '').split('/')[0] || href.replace(/\/+$/, '').split('/').pop() || `mg-${results.length + 1}`;
+            const $img = $el.find('img').first();
+            const rawImg = $img.attr('data-src') || $img.attr('data-lazy-src') || $img.attr('src') || '';
+            const cover = normalizeAssetUrl(rawImg, MGEKO_BASE);
+
+            const authorText = $el.find('.author, .novel-author, h6').first().text().replace(/^Author\(S\)\s*:\s*/i, '').trim();
+            const summaryText = $el.find('.summary, .description, p').first().text().trim();
+
+            results.push({
+                mgekoId: slug,
+                mgekoUrl: href,
+                sourceHost: 'mgeko.cc',
+                title,
+                author: authorText || 'Mgeko Creator',
+                cover: cover || 'https://placehold.co/400x600/1a1d30/ec4899?text=Mgeko.cc',
+                genres: ['Action', 'Manga'],
+                status: 'Ongoing',
+                rating: '9.6',
+                synopsis: summaryText || `Imported from Mgeko.cc (${title}).`
+            });
+        });
+    }
+
+    // 3. Fallback: scan any <a href="/manga/..."> anchor blocks if custom container layout
+    if (results.length === 0) {
+        $('a[href*="/manga/"]').each((_, el) => {
+            const $a = $(el);
+            let href = ($a.attr('href') || '').trim();
+            if (!href || /\/all-chapters/i.test(href)) return;
+            if (href.startsWith('/')) href = `${MGEKO_BASE}${href}`;
+            if (!href.startsWith('http') || seenUrls.has(href)) return;
+
+            const title = (
+                $a.find('.novel-title, h4, h3, .title').first().text().trim() ||
+                $a.attr('title') ||
+                $a.text().trim()
+            );
+            if (!title || title.length < 2 || /^(home|browse|manga|all chapters|read)$/i.test(title)) return;
+            seenUrls.add(href);
+
+            const slug = href.split('/manga/')[1]?.replace(/\/+$/, '').split('/')[0] || `mg-${results.length + 1}`;
+            const $img = $a.find('img').first().length ? $a.find('img').first() : $a.closest('li, div, article').find('img').first();
+            const rawImg = $img.attr('data-src') || $img.attr('src') || '';
+            const cover = normalizeAssetUrl(rawImg, MGEKO_BASE);
+
+            results.push({
+                mgekoId: slug,
+                mgekoUrl: href,
+                sourceHost: 'mgeko.cc',
+                title,
+                author: 'Mgeko Creator',
+                cover: cover || 'https://placehold.co/400x600/1a1d30/ec4899?text=Mgeko.cc',
+                genres: ['Action', 'Manga'],
+                status: 'Ongoing',
+                rating: '9.6',
+                synopsis: `Imported from Mgeko.cc (${title}).`
+            });
+        });
+    }
+
+    return results;
+}
+
+export function parseMgekoChaptersHtml(html = '') {
+    const rawChapters = [];
+    const seenUrls = new Set();
+    if (!html) return rawChapters;
+
+    const $ = cheerio.load(html);
+    const chapterSelectors = 'ul.chapter-list li a, #chapter-list li a, .chapter-list a, a[href*="/reader/"]';
+
+    $(chapterSelectors).each((_, el) => {
+        const $a = $(el);
+        let chUrl = ($a.attr('href') || '').trim();
+        if (!chUrl || chUrl === '#' || chUrl.startsWith('javascript:')) return;
+        if (chUrl.startsWith('/')) chUrl = `${MGEKO_BASE}${chUrl}`;
+        if (!chUrl.startsWith('http') || seenUrls.has(chUrl)) return;
+        seenUrls.add(chUrl);
+
+        let rawTitle = (
+            $a.find('.chapter-title, .chapter-number, strong').first().text().trim() ||
+            $a.attr('title') ||
+            $a.clone().children('time, span.chapter-update, .chapter-release-date').remove().end().text().trim() ||
+            $a.text().trim()
+        );
+        rawTitle = rawTitle.replace(/\s+/g, ' ').replace(/-eng-li$/i, '').trim();
+
+        const chSlug = chUrl.replace(/\/+$/, '').split('/').pop() || `ch-${rawChapters.length + 1}`;
+        const slugClean = chSlug.replace(/-eng-li$/i, '');
+
+        const numFromSlug =
+            slugClean.match(/chapter-(\d+(?:[.-]\d+)?)/i) ||
+            slugClean.match(/(?:^|-)(\d+(?:[.-]\d+)?)$/i);
+        const numFromTitle =
+            rawTitle.match(/chapter\s*(\d+(?:[.-]\d+)?)/i) ||
+            rawTitle.match(/^(\d+(?:[.-]\d+)?)/);
+
+        const rawNumStr = numFromSlug ? numFromSlug[1] : (numFromTitle ? numFromTitle[1] : null);
+        const parsedNum = rawNumStr ? parseFloat(rawNumStr.replace('-', '.')) : null;
+
+        const cleanDisplayTitle =
+            rawTitle && /chapter/i.test(rawTitle)
+                ? rawTitle
+                : parsedNum !== null && !isNaN(parsedNum)
+                ? `Chapter ${parsedNum}`
+                : (rawTitle || `Chapter ${rawChapters.length + 1}`);
+
+        rawChapters.push({
+            id: chSlug,
+            url: chUrl,
+            title: cleanDisplayTitle,
+            parsedNum
+        });
+    });
+
+    rawChapters.reverse();
+    const finalChapters = [];
+    const seenNumbers = new Set();
+
+    for (let idx = 0; idx < rawChapters.length; idx++) {
+        const ch = rawChapters[idx];
+        const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
+        if (seenNumbers.has(num)) continue;
+        seenNumbers.add(num);
+
+        finalChapters.push({
+            id: ch.id,
+            url: ch.url,
+            title: ch.title || `Chapter ${num}`,
+            number: num,
+            seqIndex: finalChapters.length + 1
+        });
+    }
+
+    return finalChapters;
+}
+
+export function parseMgekoPagesHtml(html = '') {
+    const pages = [];
+    const seen = new Set();
+    if (!html) return pages;
+
+    const $ = cheerio.load(html);
+    const readerSelectors = '#chapter-reader img, .chapter-reader img, .reading-content img, .reader-area img, #readerarea img';
+    let $imgs = $(readerSelectors);
+    if ($imgs.length === 0) {
+        $imgs = $('img');
+    }
+
+    $imgs.each((_, el) => {
+        const $img = $(el);
+        const alt = ($img.attr('alt') || '').toLowerCase();
+        const cls = ($img.attr('class') || '').toLowerCase();
+        const idAttr = ($img.attr('id') || '').toLowerCase();
+        if (/logo|avatar|banner|icon|favicon|discord|warning|credit/.test(alt + ' ' + cls + ' ' + idAttr)) return;
+
+        const rawSrc =
+            $img.attr('data-src') ||
+            $img.attr('data-lazy-src') ||
+            $img.attr('data-url') ||
+            $img.attr('src') ||
+            '';
+        const cleanUrl = normalizeAssetUrl(rawSrc, MGEKO_BASE);
+        if (!cleanUrl) return;
+        if (/logo|avatar|banner|favicon|static\/img|blank\.gif|loading/i.test(cleanUrl)) return;
+
+        if (!seen.has(cleanUrl)) {
+            seen.add(cleanUrl);
+            pages.push(cleanUrl);
+        }
+    });
+
+    return pages;
+}
+
+export async function fetchMgekoSearch(query = '') {
+    const cleanQ = (query || '').trim();
+    if (cleanQ.startsWith('http') && cleanQ.includes('mgeko.cc')) {
+        const { html, finalUrl } = await fetchHtmlWithFallback(cleanQ, MGEKO_HEADERS);
+        return parseMgekoHtmlSearch(html, finalUrl || cleanQ, cleanQ);
+    }
+
+    const searchUrls = cleanQ
+        ? [
+              `${MGEKO_BASE}/search/?search=${encodeURIComponent(cleanQ)}`,
+              `${MGEKO_BASE}/autocomplete?term=${encodeURIComponent(cleanQ)}`
+          ]
+        : [`${MGEKO_BASE}/browse-comics/`];
+
+    for (const targetUrl of searchUrls) {
+        try {
+            const { html, finalUrl } = await fetchHtmlWithFallback(targetUrl, MGEKO_HEADERS);
+            const parsed = parseMgekoHtmlSearch(html, finalUrl || targetUrl, cleanQ);
+            if (parsed.length > 0) return parsed;
+        } catch (_) {}
+    }
+
+    return [];
+}
+
+export async function fetchMgekoChapters(urlOrSlug = '') {
+    const clean = (urlOrSlug || '').trim();
+    let baseMangaUrl = clean.startsWith('http')
+        ? clean
+        : `${MGEKO_BASE}/manga/${clean.replace(/^\/+|\/+$/g, '').replace(/^manga\//i, '')}/`;
+
+    baseMangaUrl = baseMangaUrl.replace(/\/all-chapters\/?$/i, '/');
+    if (!baseMangaUrl.endsWith('/')) baseMangaUrl += '/';
+    const allChaptersUrl = `${baseMangaUrl}all-chapters/`;
+
+    try {
+        const { html } = await fetchHtmlWithFallback(allChaptersUrl, MGEKO_HEADERS);
+        const list = parseMgekoChaptersHtml(html);
+        if (list.length > 0) return list;
+    } catch (_) {}
+
+    const { html } = await fetchHtmlWithFallback(baseMangaUrl, MGEKO_HEADERS);
+    return parseMgekoChaptersHtml(html);
+}
+
+export async function fetchMgekoPages(chapterUrl = '') {
+    const clean = (chapterUrl || '').trim();
+    const targetUrl = clean.startsWith('http')
+        ? clean
+        : `${MGEKO_BASE}${clean.startsWith('/') ? '' : '/'}${clean}`;
+    const { html } = await fetchHtmlWithFallback(targetUrl, MGEKO_HEADERS);
+    return parseMgekoPagesHtml(html);
 }

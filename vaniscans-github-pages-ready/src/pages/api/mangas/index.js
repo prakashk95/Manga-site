@@ -34,6 +34,9 @@ export async function POST({ request }) {
         if (existing.rows.length === 0 && manga.mangafireId) {
             existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE mangafireId = ?', args: [manga.mangafireId] });
         }
+        if (existing.rows.length === 0 && manga.mgekoId) {
+            existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE mgekoId = ?', args: [manga.mgekoId] });
+        }
 
         const existingRow = existing.rows.length > 0 ? existing.rows[0] : null;
         const finalId = existingRow ? existingRow.id : manga.id;
@@ -50,9 +53,9 @@ export async function POST({ request }) {
 
         await db.execute({
             sql: `INSERT INTO mangas (
-                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl,
+                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl, mgekoId, mgekoUrl,
                 title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 mangadexId = excluded.mangadexId,
                 mangakatanaId = excluded.mangakatanaId,
@@ -60,6 +63,8 @@ export async function POST({ request }) {
                 mangafireId = excluded.mangafireId,
                 comixId = excluded.comixId,
                 comixUrl = excluded.comixUrl,
+                mgekoId = excluded.mgekoId,
+                mgekoUrl = excluded.mgekoUrl,
                 title = excluded.title,
                 author = excluded.author,
                 cover = excluded.cover,
@@ -79,6 +84,8 @@ export async function POST({ request }) {
                 manga.mangafireId || null,
                 manga.comixId || null,
                 manga.comixUrl || null,
+                manga.mgekoId || null,
+                manga.mgekoUrl || null,
                 manga.title,
                 manga.author || 'Author Unknown',
                 manga.cover || '',

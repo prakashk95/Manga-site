@@ -12,6 +12,13 @@ export async function GET({ request }) {
 
         let referer = 'https://mangakatana.com/';
         if (
+            source === 'mgeko' ||
+            targetUrl.includes('mgeko.cc') ||
+            targetUrl.includes('imgsrv') ||
+            chapterUrl.includes('mgeko.cc')
+        ) {
+            referer = 'https://www.mgeko.cc/';
+        } else if (
             source === 'comix' ||
             targetUrl.includes('comix.to') ||
             chapterUrl.includes('comix.to')

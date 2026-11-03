@@ -17,6 +17,9 @@ import {
     parseComixHtmlSearch,
     parseComixChaptersHtml,
     parseComixPagesHtml,
+    parseMgekoHtmlSearch,
+    parseMgekoChaptersHtml,
+    parseMgekoPagesHtml,
     formatMangaDexSearchData,
     fetchMangaFireSearch,
     fetchMangaFireChapters,
@@ -343,15 +346,18 @@ export default function AdminPanelPage() {
         if (presetQuery !== null) setSearchQuery(presetQuery);
 
         let activeSrc = forceSource || crawlerSource;
-        if (q.includes('comix.to')) activeSrc = 'comix';
+        if (q.includes('mgeko.cc')) activeSrc = 'mgeko';
+        else if (q.includes('comix.to')) activeSrc = 'comix';
         else if (q.includes('mangakatana.com')) activeSrc = 'mangakatana';
 
-        if (forceSource || q.includes('comix.to') || q.includes('mangakatana.com')) {
+        if (forceSource || q.includes('mgeko.cc') || q.includes('comix.to') || q.includes('mangakatana.com')) {
             setCrawlerSource(activeSrc);
         }
 
         const sourceLabel =
-            activeSrc === 'comix'
+            activeSrc === 'mgeko'
+                ? 'Mgeko.cc'
+                : activeSrc === 'comix'
                 ? 'Comix.to'
                 : activeSrc === 'mangakatana'
                 ? 'MangaKatana.com'
@@ -373,7 +379,12 @@ export default function AdminPanelPage() {
 
             // Client-side fallback if serverless container returned 0 results
             if (list.length === 0) {
-                if (activeSrc === 'comix') {
+                if (activeSrc === 'mgeko') {
+                    let targetUrl = q ? `https://www.mgeko.cc/search/?search=${encodeURIComponent(q)}` : 'https://www.mgeko.cc/browse-comics/';
+                    if (q.startsWith('http') && q.includes('mgeko.cc')) targetUrl = q;
+                    const html = await fetchClientHtmlFallback(targetUrl);
+                    list = parseMgekoHtmlSearch(html, targetUrl, q);
+                } else if (activeSrc === 'comix') {
                     let targetUrl = `https://comix.to/search?q=${encodeURIComponent(q)}`;
                     if (q.startsWith('http') && q.includes('comix.to')) targetUrl = q;
                     const html = await fetchClientHtmlFallback(targetUrl);
@@ -423,13 +434,16 @@ export default function AdminPanelPage() {
         setSelectedMangaToCrawl(item);
         setCrawledChaptersList([]);
         setCrawlChapterFilter('');
+        const isMgeko = item.sourceHost === 'mgeko.cc' || !!item.mgekoId;
         const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
         const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
         const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
         setScannerStatus(`Loading full chapter list for "${item.title}"...`);
 
         try {
-            const endpoint = isComix
+            const endpoint = isMgeko
+                ? `/api/crawler/chapters?source=mgeko&url=${encodeURIComponent(item.mgekoUrl || item.mgekoId)}`
+                : isComix
                 ? `/api/crawler/chapters?source=comix&url=${encodeURIComponent(item.comixUrl || item.comixId)}`
                 : isMangaFire
                 ? `/api/crawler/chapters?source=mangafire&mangaId=${encodeURIComponent(item.mangafireId)}&lang=${encodeURIComponent(crawlerLang)}`
@@ -443,7 +457,15 @@ export default function AdminPanelPage() {
 
             // Client-side fallback if serverless fetch returned 0 chapters
             if (list.length === 0) {
-                if (isComix) {
+                if (isMgeko) {
+                    let baseUrl = (item.mgekoUrl || '').startsWith('http')
+                        ? item.mgekoUrl
+                        : `https://www.mgeko.cc/manga/${(item.mgekoId || '').replace(/^\/+|\/+$/g, '')}/`;
+                    baseUrl = baseUrl.replace(/\/all-chapters\/?$/i, '/');
+                    if (!baseUrl.endsWith('/')) baseUrl += '/';
+                    const html = await fetchClientHtmlFallback(`${baseUrl}all-chapters/`);
+                    list = parseMgekoChaptersHtml(html);
+                } else if (isComix) {
                     const cleanUrl = (item.comixUrl || '').startsWith('http')
                         ? item.comixUrl
                         : `https://comix.to/comic/${(item.comixId || '').replace(/^\/+/, '')}`;
@@ -505,10 +527,13 @@ export default function AdminPanelPage() {
 
         try {
             const item = selectedMangaToCrawl;
+            const isMgeko = item.sourceHost === 'mgeko.cc' || !!item.mgekoId;
             const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
             const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
             const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
-            const defaultId = isComix
+            const defaultId = isMgeko
+                ? `manga-mg-${(item.mgekoId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
+                : isComix
                 ? `manga-co-${(item.comixId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
                 : isMangaFire
                 ? `manga-mf-${(item.mangafireId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
@@ -524,6 +549,8 @@ export default function AdminPanelPage() {
                 mangafireId: item.mangafireId || null,
                 comixId: item.comixId || null,
                 comixUrl: item.comixUrl || null,
+                mgekoId: item.mgekoId || null,
+                mgekoUrl: item.mgekoUrl || null,
                 title: item.title,
                 author: item.author || 'Manga Creator',
                 cover: item.cover,
@@ -555,7 +582,9 @@ export default function AdminPanelPage() {
                 let pagesSaver = [];
 
                 try {
-                    const pageRes = isComix
+                    const pageRes = isMgeko
+                        ? await fetch(`/api/crawler/pages?source=mgeko&url=${encodeURIComponent(ch.url)}`)
+                        : isComix
                         ? await fetch(`/api/crawler/pages?source=comix&url=${encodeURIComponent(ch.url)}`)
                         : isMangaFire
                         ? await fetch(`/api/crawler/pages?source=mangafire&chapterId=${encodeURIComponent(ch.mangafireChapterId || ch.id)}`)
@@ -569,7 +598,13 @@ export default function AdminPanelPage() {
 
                 // Client-side fallback if serverless page fetch returned empty
                 if (pages.length === 0) {
-                    if (isComix && ch.url) {
+                    if (isMgeko && ch.url) {
+                        try {
+                            const html = await fetchClientHtmlFallback(ch.url);
+                            pages = parseMgekoPagesHtml(html);
+                            pagesSaver = pages;
+                        } catch (_) {}
+                    } else if (isComix && ch.url) {
                         try {
                             const html = await fetchClientHtmlFallback(ch.url);
                             pages = parseComixPagesHtml(html);
@@ -590,14 +625,15 @@ export default function AdminPanelPage() {
                 }
 
                 if (pages.length > 0) {
-                    const prefix = isComix ? 'co' : isMangaFire ? 'mf' : isKatana ? 'mk' : 'md';
+                    const prefix = isMgeko ? 'mg' : isComix ? 'co' : isMangaFire ? 'mf' : isKatana ? 'mk' : 'md';
                     finalChapters.push({
                         id: `${targetMangaId}-${prefix}-${ch.id || i}`,
                         mangaId: targetMangaId,
-                        mangadexChapterId: ch.mangadexChapterId || (!isKatana && !isMangaFire && !isComix ? ch.id : null),
+                        mangadexChapterId: ch.mangadexChapterId || (!isKatana && !isMangaFire && !isComix && !isMgeko ? ch.id : null),
                         mangakatanaChapterUrl: isKatana ? (ch.url || null) : null,
                         mangafireChapterId: ch.mangafireChapterId || (isMangaFire ? ch.id : null),
                         comixChapterUrl: isComix ? (ch.url || null) : null,
+                        mgekoChapterUrl: isMgeko ? (ch.url || null) : null,
                         title: ch.title,
                         number: typeof ch.number === 'number' && !isNaN(ch.number) ? ch.number : (i + 1),
                         pages,
@@ -832,7 +868,7 @@ export default function AdminPanelPage() {
                         2. Add Single Chapter
                     </button>
                     <button onClick={() => setActiveTab('crawler')} className={`py-3 px-5 border-b-2 whitespace-nowrap ${activeTab === 'crawler' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
-                        3. MangaDex, MangaKatana, MangaFire & Comix.to Crawler
+                        3. MangaDex, Katana, MangaFire, Comix & Mgeko Crawler
                     </button>
                     <button onClick={() => setActiveTab('analyticsAds')} className={`py-3 px-5 border-b-2 whitespace-nowrap ${activeTab === 'analyticsAds' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
                         4. Analytics & Ad Placements
@@ -1140,6 +1176,9 @@ export default function AdminPanelPage() {
                                     <button type="button" onClick={() => setCrawlerSource('comix')} className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition ${crawlerSource === 'comix' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-[#1a1d30] text-slate-300 border border-[#2b3052]'}`}>
                                         📘 Comix.to
                                     </button>
+                                    <button type="button" onClick={() => setCrawlerSource('mgeko')} className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition ${crawlerSource === 'mgeko' ? 'bg-pink-600 text-white shadow-lg shadow-pink-600/30' : 'bg-[#1a1d30] text-slate-300 border border-[#2b3052]'}`}>
+                                        🦎 Mgeko.cc
+                                    </button>
                                 </div>
                             </div>
 
@@ -1164,13 +1203,18 @@ export default function AdminPanelPage() {
                                 <button type="button" onClick={() => handleScan('Solo Leveling', 'comix')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold transition">
                                     Solo Leveling (Comix.to)
                                 </button>
+                                <button type="button" onClick={() => handleScan('Solo Leveling', 'mgeko')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-pink-600/30 text-pink-300 border border-pink-500/30 text-[11px] font-bold transition">
+                                    Solo Leveling (Mgeko.cc)
+                                </button>
                             </div>
 
                             {/* Search Bar */}
                             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                                 <div className="md:col-span-8">
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        {crawlerSource === 'comix'
+                                        {crawlerSource === 'mgeko'
+                                            ? 'Search Mgeko.cc Title or Direct Series URL'
+                                            : crawlerSource === 'comix'
                                             ? 'Search Comix.to Title or Direct Series URL'
                                             : crawlerSource === 'mangakatana'
                                             ? 'Search MangaKatana Title or Series URL'
@@ -1184,7 +1228,9 @@ export default function AdminPanelPage() {
                                         onChange={e => setSearchQuery(e.target.value)}
                                         onKeyDown={e => e.key === 'Enter' && handleScan()}
                                         placeholder={
-                                            crawlerSource === 'comix'
+                                            crawlerSource === 'mgeko'
+                                                ? 'e.g. Solo Leveling, Omniscient Reader, or https://www.mgeko.cc/manga/...'
+                                                : crawlerSource === 'comix'
                                                 ? 'e.g. Solo Leveling, One Piece, or https://comix.to/comic/...'
                                                 : crawlerSource === 'mangakatana'
                                                 ? 'e.g. Naruto, Solo Leveling, or mangakatana.com/manga/...'
@@ -1200,7 +1246,7 @@ export default function AdminPanelPage() {
                                     <select
                                         value={crawlerLang}
                                         onChange={e => setCrawlerLang(e.target.value)}
-                                        disabled={crawlerSource === 'mangakatana' || crawlerSource === 'comix'}
+                                        disabled={crawlerSource === 'mangakatana' || crawlerSource === 'comix' || crawlerSource === 'mgeko'}
                                         className="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3 py-2.5 text-xs sm:text-sm text-white disabled:opacity-50"
                                     >
                                         <option value="en">English (EN)</option>
@@ -1217,7 +1263,9 @@ export default function AdminPanelPage() {
                                         {isScanning
                                             ? 'Searching...'
                                             : `Search ${
-                                                  crawlerSource === 'comix'
+                                                  crawlerSource === 'mgeko'
+                                                      ? 'Mgeko.cc'
+                                                      : crawlerSource === 'comix'
                                                       ? 'Comix.to'
                                                       : crawlerSource === 'mangakatana'
                                                       ? 'Katana'
@@ -1241,6 +1289,7 @@ export default function AdminPanelPage() {
                                     {!selectedMangaToCrawl ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1">
                                             {scannedResults.map((item, idx) => {
+                                                const isMgekoItem = item.sourceHost === 'mgeko.cc' || !!item.mgekoId;
                                                 const isComixItem = item.sourceHost === 'comix.to' || !!item.comixId;
                                                 const isKatanaItem = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
                                                 const isMangaFireItem = item.sourceHost === 'mangafire' || !!item.mangafireId;
@@ -1250,7 +1299,9 @@ export default function AdminPanelPage() {
                                                             <img src={item.cover} alt="" referrerPolicy="no-referrer" className="w-20 h-28 object-cover rounded-xl shrink-0 border border-white/10" />
                                                             <div className="min-w-0 flex-1 space-y-1">
                                                                 <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border inline-block ${
-                                                                    isComixItem
+                                                                    isMgekoItem
+                                                                        ? 'bg-pink-500/20 text-pink-300 border-pink-500/30'
+                                                                        : isComixItem
                                                                         ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
                                                                         : isMangaFireItem
                                                                         ? 'bg-orange-500/20 text-orange-300 border-orange-500/30'
@@ -1258,7 +1309,7 @@ export default function AdminPanelPage() {
                                                                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                                                                         : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
                                                                 }`}>
-                                                                    {isComixItem ? 'Comix.to' : isMangaFireItem ? 'MangaFire' : isKatanaItem ? 'MangaKatana' : 'MangaDex.org'}
+                                                                    {isMgekoItem ? 'Mgeko.cc' : isComixItem ? 'Comix.to' : isMangaFireItem ? 'MangaFire' : isKatanaItem ? 'MangaKatana' : 'MangaDex.org'}
                                                                 </span>
                                                                 <h4 className="text-xs font-black text-white line-clamp-2">{item.title}</h4>
                                                                 <p className="text-[11px] text-purple-300 truncate">{item.author}</p>
