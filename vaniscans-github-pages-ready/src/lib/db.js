@@ -44,8 +44,7 @@ const SCHEMA_STATEMENTS = [
         synopsis TEXT,
         updatedAt INTEGER,
         metaTitle TEXT,
-        metaDescription TEXT,
-        customSlug TEXT
+        metaDescription TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS chapters (
         id TEXT PRIMARY KEY,
@@ -171,9 +170,6 @@ export async function getDb() {
 
 export function getMangaSlug(m) {
     if (!m) return 'series';
-    if (m.customSlug && m.customSlug.trim()) {
-        return m.customSlug.trim().replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase();
-    }
     const base = (m.title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.mgekoId || m.id || '')
         .toString()
@@ -233,7 +229,6 @@ export async function getServerCatalogWithChapters() {
                 synopsis: r.synopsis || '',
                 metaTitle: r.metaTitle || '',
                 metaDescription: r.metaDescription || '',
-                customSlug: r.customSlug || '',
                 latestChapters: chaptersByMangaId[r.id] || [],
                 updatedAt: Number(r.updatedAt) || Date.now()
             };

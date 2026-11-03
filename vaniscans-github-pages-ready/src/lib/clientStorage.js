@@ -309,11 +309,13 @@ export async function fetchAndSyncMangas() {
 
     const localMangas = await getLocalMangas();
 
-    // Re-push any browser-saved mangas to the server SQLite DB if missing on the server
+    // Re-push any browser-saved mangas (and any unsynced local chapters) to the server SQLite DB
     if (apiOk && localMangas.length > 0) {
-        const remoteIds = new Set(remoteMangas.map(m => m.id));
+        const remoteMap = new Map(remoteMangas.map(m => [m.id, m]));
         for (const lm of localMangas) {
-            if (lm && lm.id && !remoteIds.has(lm.id)) {
+            if (!lm || !lm.id) continue;
+            const rm = remoteMap.get(lm.id);
+            if (!rm) {
                 try {
                     await fetch('/api/mangas', {
                         method: 'POST',
@@ -329,6 +331,27 @@ export async function fetchAndSyncMangas() {
                         });
                     }
                     remoteMangas.push(lm);
+                } catch (_) {}
+            } else if (!Array.isArray(rm.latestChapters) || rm.latestChapters.length === 0) {
+                // Server has the manga but 0 chapters (e.g., from an earlier failed bulk insert)
+                try {
+                    const localChs = await getLocalChaptersForManga(lm.id);
+                    if (localChs && localChs.length > 0) {
+                        await fetch('/api/chapters/bulk', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ chapters: localChs })
+                        });
+                        const sortedLocal = [...localChs].sort((a, b) => (Number(b.number) || 0) - (Number(a.number) || 0));
+                        rm.latestChapters = sortedLocal.slice(0, 3).map(c => ({
+                            id: c.id,
+                            mangaId: lm.id,
+                            title: c.title || `Chapter ${c.number || 1}`,
+                            number: Number(c.number) || 1,
+                            pageCount: Array.isArray(c.pages) ? c.pages.length : 0,
+                            createdAt: Number(c.createdAt) || Date.now()
+                        }));
+                    }
                 } catch (_) {}
             }
         }

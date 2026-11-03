@@ -54,8 +54,8 @@ export async function POST({ request }) {
         await db.execute({
             sql: `INSERT INTO mangas (
                 id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl, mgekoId, mgekoUrl,
-                title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription, customSlug
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 mangadexId = excluded.mangadexId,
                 mangakatanaId = excluded.mangakatanaId,
@@ -96,8 +96,7 @@ export async function POST({ request }) {
                 manga.synopsis || '',
                 updatedAt,
                 metaTitle,
-                metaDescription,
-                manga.customSlug ? manga.customSlug.trim().toLowerCase() : null
+                metaDescription
             ]
         });
 
