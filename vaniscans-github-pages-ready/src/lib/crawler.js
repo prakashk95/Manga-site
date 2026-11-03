@@ -1059,6 +1059,32 @@ export async function fetchMgekoPages(chapterUrl = '') {
 // FANFOX.NET SCRAPER FUNCTIONS (Powered by Cheerio + Mobile Roll Reader)
 // ============================================================================
 
+function normalizeFanfoxCoverUrl(raw = '') {
+    if (!raw || typeof raw !== 'string') return '';
+    const cleaned = raw.trim().replace(/&amp;/g, '&');
+    if (/no-cover|blank\.gif|loading|logo/i.test(cleaned)) return '';
+    return normalizeAssetUrl(cleaned, FANFOX_BASE);
+}
+
+export function extractFanfoxCoverFromDetailHtml(html = '') {
+    if (!html) return '';
+    const $ = cheerio.load(html);
+    const candidates = [
+        $('img.detail-info-cover-img').first().attr('data-src'),
+        $('img.detail-info-cover-img').first().attr('data-original'),
+        $('img.detail-info-cover-img').first().attr('src'),
+        $('.detail-info-cover img').first().attr('data-src'),
+        $('.detail-info-cover img').first().attr('src'),
+        $('.detail-cover img, .manga-detail-top img').first().attr('src'),
+        $('meta[property="og:image"]').attr('content')
+    ];
+    for (const c of candidates) {
+        const norm = normalizeFanfoxCoverUrl(c);
+        if (norm) return norm;
+    }
+    return '';
+}
+
 export function parseFanfoxHtmlSearch(html = '', finalUrl = '', fallbackQuery = '') {
     const results = [];
     if (!html) return results;
@@ -1068,7 +1094,7 @@ export function parseFanfoxHtmlSearch(html = '', finalUrl = '', fallbackQuery = 
     // 1. Check if single manga detail page (e.g. https://fanfox.net/manga/solo_leveling/)
     const isDetailPage =
         (finalUrl && /\/manga\/[^/?#]+/i.test(finalUrl) && !/\/search/i.test(finalUrl)) ||
-        ($('.detail-info-right-title-font, .detail-info-right').length > 0 && $('.manga-list-4-list li').length === 0);
+        ($('.detail-info-right-title-font, .detail-info-right').length > 0 && $('.manga-list-4-list li, .manga-list-1-list li').length === 0);
 
     if (isDetailPage) {
         const title =
@@ -1081,11 +1107,7 @@ export function parseFanfoxHtmlSearch(html = '', finalUrl = '', fallbackQuery = 
             $('.detail-info-right-say a').first().text().trim() ||
             'FanFox Creator';
 
-        const rawCover =
-            $('img.detail-info-cover-img').first().attr('src') ||
-            $('meta[property="og:image"]').attr('content') ||
-            '';
-        const cover = normalizeAssetUrl(rawCover, FANFOX_BASE);
+        const cover = extractFanfoxCoverFromDetailHtml(html);
 
         const synopsis =
             $('p.fullcontent').first().text().trim() ||
@@ -1121,9 +1143,9 @@ export function parseFanfoxHtmlSearch(html = '', finalUrl = '', fallbackQuery = 
         return results;
     }
 
-    // 2. Parse search / directory cards (.manga-list-4-list li, .manga-list-1-list li)
+    // 2. Parse search / directory cards (.manga-list-4-list li, .manga-list-1-list li, mobile .post-one)
     const seenUrls = new Set();
-    $('ul.manga-list-4-list li, ul.manga-list-1-list li, .manga-list-4 li').each((_, el) => {
+    $('ul.manga-list-4-list li, ul.manga-list-1-list li, .manga-list-4 li, .manga-list-1 li, .line-list li, .post-one').each((_, el) => {
         const $el = $(el);
         const $link = $el.find('p.manga-list-4-item-title a, p.manga-list-1-item-title a, a[href*="/manga/"]').first();
         let href = ($link.attr('href') || '').trim();
@@ -1132,14 +1154,24 @@ export function parseFanfoxHtmlSearch(html = '', finalUrl = '', fallbackQuery = 
         else if (href.startsWith('/')) href = `${FANFOX_BASE}${href}`;
         if (!href.startsWith('http') || seenUrls.has(href)) return;
 
-        const title = ($link.attr('title') || $link.text() || '').trim();
+        const title = (
+            $link.attr('title') ||
+            $el.find('p.manga-list-4-item-title, p.manga-list-1-item-title, .title').first().text() ||
+            $link.text() ||
+            ''
+        ).trim();
         if (!title) return;
         seenUrls.add(href);
 
         const slug = href.split('/manga/')[1]?.replace(/\/+$/, '').split('/')[0] || `ff-${results.length + 1}`;
-        const $img = $el.find('img').first();
-        const rawImg = $img.attr('data-src') || $img.attr('src') || '';
-        const cover = normalizeAssetUrl(rawImg, FANFOX_BASE);
+        const $img = $el.find('img.manga-list-4-item-cover, img.manga-list-1-item-cover, img').first();
+        const rawImg =
+            $img.attr('data-src') ||
+            $img.attr('data-original') ||
+            $img.attr('data-lazy-src') ||
+            $img.attr('src') ||
+            '';
+        const cover = normalizeFanfoxCoverUrl(rawImg);
 
         const authorText = $el.find('p.manga-list-4-item-tip a').first().text().trim();
         const summaryText = $el.find('p.manga-list-4-item-tip').last().text().trim();
@@ -1167,6 +1199,7 @@ export function parseFanfoxChaptersHtml(html = '') {
     if (!html) return rawChapters;
 
     const $ = cheerio.load(html);
+    const detailCover = extractFanfoxCoverFromDetailHtml(html);
     const chapterSelectors = '#list-2 ul.detail-main-list li a, ul.detail-main-list li a, .detail-main-list a, .chlist a[href*="/manga/"]';
 
     $(chapterSelectors).each((_, el) => {
@@ -1196,7 +1229,8 @@ export function parseFanfoxChaptersHtml(html = '') {
             id: cleanId,
             url: chUrl,
             title: displayTitle,
-            parsedNum
+            parsedNum,
+            mangaCover: detailCover || undefined
         });
     });
 
@@ -1215,7 +1249,8 @@ export function parseFanfoxChaptersHtml(html = '') {
             url: ch.url,
             title: ch.title || `Chapter ${num}`,
             number: num,
-            seqIndex: finalChapters.length + 1
+            seqIndex: finalChapters.length + 1,
+            ...(ch.mangaCover ? { mangaCover: ch.mangaCover } : {})
         });
     }
 

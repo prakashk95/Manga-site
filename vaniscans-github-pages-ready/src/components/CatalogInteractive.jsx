@@ -268,7 +268,7 @@ export default function CatalogInteractive({ initialMangas = [] }) {
                         <div className="relative max-w-7xl mx-auto min-h-[380px] sm:min-h-[440px] flex items-end p-6 sm:p-12">
                             {featured.map((manga, idx) => (
                                 <div key={manga.id} className={`absolute inset-0 w-full h-full flex items-end p-6 sm:p-12 transition-opacity duration-700 ${idx === heroSlide ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-                                    <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url('${coverSrc(manga.banner || manga.cover)}')` }}>
+                                    <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url('${coverSrc(manga.banner || manga.cover, manga.fanfoxUrl)}')` }}>
                                         <div className="absolute inset-0 bg-gradient-to-t from-[#0b0c13] via-[#0b0c13]/70 to-transparent"></div>
                                         <div className="absolute inset-0 bg-gradient-to-r from-[#0b0c13] via-[#0b0c13]/80 to-transparent"></div>
                                     </div>
@@ -378,7 +378,7 @@ export default function CatalogInteractive({ initialMangas = [] }) {
                                         return (
                                             <div key={manga.id} className="group flex flex-col bg-[#121422] rounded-2xl overflow-hidden border border-[#1f2337] hover:border-purple-500/60 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
                                                 <a href={`/comics/${mSlug}`} className="relative aspect-[3/4] overflow-hidden block">
-                                                    <img src={coverSrc(manga.cover)} alt={manga.title} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                                    <img src={coverSrc(manga.cover, manga.fanfoxUrl)} alt={manga.title} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                                                     <div className="absolute inset-0 bg-gradient-to-t from-[#121422] via-transparent to-transparent opacity-80"></div>
                                                     <div className="absolute top-2 left-2">
                                                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-600 text-white shadow">{manga.status}</span>
@@ -463,7 +463,7 @@ export default function CatalogInteractive({ initialMangas = [] }) {
                                             <div className={`w-7 h-7 rounded-lg font-black text-xs flex items-center justify-center shrink-0 ${idx === 0 ? 'bg-purple-600 text-white shadow' : 'bg-[#1a1d30] text-slate-400'}`}>
                                                 {idx + 1}
                                             </div>
-                                            <img src={coverSrc(m.cover)} alt={m.title} referrerPolicy="no-referrer" className="w-12 h-16 object-cover rounded-lg shrink-0 border border-white/5" />
+                                            <img src={coverSrc(m.cover, m.fanfoxUrl)} alt={m.title} referrerPolicy="no-referrer" className="w-12 h-16 object-cover rounded-lg shrink-0 border border-white/5" />
                                             <div className="min-w-0 flex-1">
                                                 <h4 className="text-xs font-bold text-white group-hover:text-purple-400 transition truncate">{m.title}</h4>
                                                 <p className="text-[11px] text-slate-400 truncate">{(m.genres || []).slice(0, 2).join(', ')}</p>

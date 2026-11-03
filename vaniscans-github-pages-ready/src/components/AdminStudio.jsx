@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 import { DEFAULT_MONETIZATION, mergeMonetization } from '@/lib/monetization';
+import { coverSrc } from '@/lib/coverUrl';
 import {
     verifyAdminCredentials,
     fetchAndSyncMangas,
@@ -504,6 +505,10 @@ export default function AdminPanelPage() {
             }
 
             setCrawledChaptersList(list);
+            if (list.length > 0 && list[0].mangaCover) {
+                item = { ...item, cover: list[0].mangaCover };
+                setSelectedMangaToCrawl(item);
+            }
 
             // Select all chapters by default
             const initialSelected = {};
@@ -565,19 +570,6 @@ export default function AdminPanelPage() {
                 ? `manga-mk-${(item.mangakatanaId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
                 : `manga-md-${(item.mangadexId || Date.now()).toString().slice(0, 8)}`;
 
-            // FanFox: the search-list thumbnail is often missing/expired, so read the cover from the series page itself
-            let finalCover = item.cover;
-            if (isFanfox) {
-                try {
-                    const detailUrl = (item.fanfoxUrl || '').startsWith('http')
-                        ? item.fanfoxUrl
-                        : `https://fanfox.net/manga/${(item.fanfoxId || '').replace(/^\/+|\/+$/g, '')}/`;
-                    const detailHtml = await fetchClientHtmlFallback(detailUrl);
-                    const detail = parseFanfoxHtmlSearch(detailHtml, detailUrl, item.title)[0];
-                    if (detail?.cover && !/placehold\.co/i.test(detail.cover)) finalCover = detail.cover;
-                } catch (_) {}
-            }
-
             const mangaPayload = {
                 id: defaultId,
                 mangadexId: item.mangadexId || null,
@@ -592,8 +584,8 @@ export default function AdminPanelPage() {
                 fanfoxUrl: item.fanfoxUrl || null,
                 title: item.title,
                 author: item.author || 'Manga Creator',
-                cover: finalCover,
-                banner: finalCover,
+                cover: item.cover,
+                banner: item.cover,
                 genres: item.genres || ['Action'],
                 status: item.status || 'Ongoing',
                 rating: parseFloat(item.rating) || 9.6,
@@ -1146,7 +1138,7 @@ export default function AdminPanelPage() {
                                     {mangas.map(m => (
                                         <div key={m.id} className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[#181b2e] border border-[#272b46]">
                                             <div className="flex items-center gap-3 min-w-0">
-                                                <img src={m.cover} alt="" referrerPolicy="no-referrer" className="w-10 h-14 object-cover rounded-lg shrink-0" />
+                                                <img src={coverSrc(m.cover, m.fanfoxUrl)} alt="" referrerPolicy="no-referrer" className="w-10 h-14 object-cover rounded-lg shrink-0" />
                                                 <div className="min-w-0">
                                                     <div className="text-xs font-bold text-white truncate">{m.title}</div>
                                                     <div className="text-[10px] text-slate-400">{m.status} • ★ {m.rating || '9.8'}</div>
@@ -1359,7 +1351,7 @@ export default function AdminPanelPage() {
                                                 return (
                                                     <div key={idx} className="bg-[#181b2e] border border-[#292d4b] hover:border-purple-500/50 rounded-2xl p-4 flex flex-col justify-between gap-3 transition">
                                                         <div className="flex gap-3.5">
-                                                            <img src={item.cover} alt="" referrerPolicy="no-referrer" className="w-20 h-28 object-cover rounded-xl shrink-0 border border-white/10" />
+                                                            <img src={coverSrc(item.cover, item.fanfoxUrl)} alt="" referrerPolicy="no-referrer" className="w-20 h-28 object-cover rounded-xl shrink-0 border border-white/10" />
                                                             <div className="min-w-0 flex-1 space-y-1">
                                                                 <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border inline-block ${
                                                                     isFanfoxItem
@@ -1396,7 +1388,7 @@ export default function AdminPanelPage() {
                                         <div className="space-y-4 bg-[#16182a] p-6 rounded-2xl border border-[#242945]">
                                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#21253d] pb-4">
                                                 <div className="flex items-center gap-3">
-                                                    <img src={selectedMangaToCrawl.cover} alt="" referrerPolicy="no-referrer" className="w-12 h-16 object-cover rounded-lg shrink-0" />
+                                                    <img src={coverSrc(selectedMangaToCrawl.cover, selectedMangaToCrawl.fanfoxUrl)} alt="" referrerPolicy="no-referrer" className="w-12 h-16 object-cover rounded-lg shrink-0" />
                                                     <div>
                                                         <h4 className="text-sm font-black text-white">{selectedMangaToCrawl.title}</h4>
                                                         <p className="text-xs text-slate-400">{crawledChaptersList.length} total chapters found — Check the chapters you want to pull</p>
