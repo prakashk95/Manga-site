@@ -333,7 +333,6 @@ export async function fetchAndSyncMangas() {
                     remoteMangas.push(lm);
                 } catch (_) {}
             } else if (!Array.isArray(rm.latestChapters) || rm.latestChapters.length === 0) {
-                // Server has the manga but 0 chapters (e.g., from an earlier failed bulk insert)
                 try {
                     const localChs = await getLocalChaptersForManga(lm.id);
                     if (localChs && localChs.length > 0) {

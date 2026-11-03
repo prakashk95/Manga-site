@@ -3,7 +3,8 @@ import {
     fetchHtmlWithFallback,
     fetchMangaFireChapters,
     fetchComixChapters,
-    fetchMgekoChapters
+    fetchMgekoChapters,
+    fetchFanfoxChapters
 } from '@/lib/crawler';
 
 const MANGADEX_API = 'https://api.mangadex.org';
@@ -69,13 +70,22 @@ export async function GET({ request }) {
     const url = new URL(request.url);
     const rawUrlParam = (url.searchParams.get('url') || url.searchParams.get('slug') || '').trim();
     const rawSource = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
-    const source = rawUrlParam.includes('mgeko.cc')
+    const source = rawUrlParam.includes('fanfox.net')
+        ? 'fanfox'
+        : rawUrlParam.includes('mgeko.cc')
         ? 'mgeko'
         : rawUrlParam.includes('comix.to')
         ? 'comix'
         : rawSource;
 
-    if (source === 'mgeko') {
+    if (source === 'fanfox') {
+        try {
+            const chapters = await fetchFanfoxChapters(rawUrlParam);
+            return Response.json({ result: 'ok', data: chapters });
+        } catch (err) {
+            return Response.json({ error: err.message, data: [] }, { status: 500 });
+        }
+    } else if (source === 'mgeko') {
         try {
             const chapters = await fetchMgekoChapters(rawUrlParam);
             return Response.json({ result: 'ok', data: chapters });

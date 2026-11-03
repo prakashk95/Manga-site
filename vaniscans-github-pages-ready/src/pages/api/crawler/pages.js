@@ -3,7 +3,8 @@ import {
     fetchHtmlWithFallback,
     fetchMangaFirePages,
     fetchComixPages,
-    fetchMgekoPages
+    fetchMgekoPages,
+    fetchFanfoxPages
 } from '@/lib/crawler';
 
 const MANGADEX_API = 'https://api.mangadex.org';
@@ -16,13 +17,25 @@ export async function GET({ request }) {
     const url = new URL(request.url);
     const targetUrlParam = (url.searchParams.get('url') || '').trim();
     const rawSource = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
-    const source = targetUrlParam.includes('mgeko.cc')
+    const source = targetUrlParam.includes('fanfox.net')
+        ? 'fanfox'
+        : targetUrlParam.includes('mgeko.cc')
         ? 'mgeko'
         : targetUrlParam.includes('comix.to')
         ? 'comix'
         : rawSource;
 
-    if (source === 'mgeko') {
+    if (source === 'fanfox') {
+        if (!targetUrlParam) {
+            return Response.json({ error: 'Valid FanFox.net chapter url required' }, { status: 400, headers: NO_STORE_HEADERS });
+        }
+        try {
+            const pages = await fetchFanfoxPages(targetUrlParam);
+            return Response.json({ result: 'ok', pages, pagesSaver: pages }, { headers: NO_STORE_HEADERS });
+        } catch (err) {
+            return Response.json({ error: err.message, pages: [], pagesSaver: [] }, { status: 500, headers: NO_STORE_HEADERS });
+        }
+    } else if (source === 'mgeko') {
         if (!targetUrlParam) {
             return Response.json({ error: 'Valid Mgeko.cc chapter url required' }, { status: 400, headers: NO_STORE_HEADERS });
         }

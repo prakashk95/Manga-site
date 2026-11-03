@@ -4,6 +4,8 @@ const USER_AGENT = 'VaniScans/5.0 (+https://vaniscans.online)';
 const MANGAKATANA_BASE = 'https://mangakatana.com';
 export const COMIX_BASE = 'https://comix.to';
 export const MGEKO_BASE = 'https://www.mgeko.cc';
+export const FANFOX_BASE = 'https://fanfox.net';
+export const FANFOX_MOBILE_BASE = 'https://m.fanfox.net';
 
 
 export const MK_HEADERS = {
@@ -27,6 +29,14 @@ export const MGEKO_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
     'Referer': 'https://www.mgeko.cc/'
+};
+
+export const FANFOX_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cookie': 'isAdult=1',
+    'Referer': 'https://fanfox.net/'
 };
 
 export function isCloudflareOrBlockedHtml(html = '') {
@@ -296,7 +306,7 @@ export function parseMangaKatanaPagesHtml(html) {
 }
 
 export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
-    const headersToUse = customHeaders || (targetUrl.includes('mgeko.cc') ? MGEKO_HEADERS : targetUrl.includes('comix.to') ? COMIX_HEADERS : MK_HEADERS);
+    const headersToUse = customHeaders || (targetUrl.includes('fanfox.net') ? FANFOX_HEADERS : targetUrl.includes('mgeko.cc') ? MGEKO_HEADERS : targetUrl.includes('comix.to') ? COMIX_HEADERS : MK_HEADERS);
     try {
         const directRes = await fetch(targetUrl, {
             headers: headersToUse,
@@ -1042,4 +1052,251 @@ export async function fetchMgekoPages(chapterUrl = '') {
         : `${MGEKO_BASE}${clean.startsWith('/') ? '' : '/'}${clean}`;
     const { html } = await fetchHtmlWithFallback(targetUrl, MGEKO_HEADERS);
     return parseMgekoPagesHtml(html);
+}
+
+
+// ============================================================================
+// FANFOX.NET SCRAPER FUNCTIONS (Powered by Cheerio + Mobile Roll Reader)
+// ============================================================================
+
+export function parseFanfoxHtmlSearch(html = '', finalUrl = '', fallbackQuery = '') {
+    const results = [];
+    if (!html) return results;
+
+    const $ = cheerio.load(html);
+
+    // 1. Check if single manga detail page (e.g. https://fanfox.net/manga/solo_leveling/)
+    const isDetailPage =
+        (finalUrl && /\/manga\/[^/?#]+/i.test(finalUrl) && !/\/search/i.test(finalUrl)) ||
+        ($('.detail-info-right-title-font, .detail-info-right').length > 0 && $('.manga-list-4-list li').length === 0);
+
+    if (isDetailPage) {
+        const title =
+            $('.detail-info-right-title-font').first().text().trim() ||
+            $('meta[property="og:title"]').attr('content')?.replace(/\s*Manga\s*-\s*Read.*$/i, '').trim() ||
+            fallbackQuery ||
+            'FanFox Series';
+
+        const author =
+            $('.detail-info-right-say a').first().text().trim() ||
+            'FanFox Creator';
+
+        const rawCover =
+            $('img.detail-info-cover-img').first().attr('src') ||
+            $('meta[property="og:image"]').attr('content') ||
+            '';
+        const cover = normalizeAssetUrl(rawCover, FANFOX_BASE);
+
+        const synopsis =
+            $('p.fullcontent').first().text().trim() ||
+            $('.detail-info-right-content').first().text().trim() ||
+            $('meta[property="og:description"]').attr('content')?.trim() ||
+            `Imported directly from FanFox.net (${title}).`;
+
+        const genres = [];
+        $('.detail-info-right-tag-list a').each((_, el) => {
+            const g = $(el).text().trim();
+            if (g && genres.length < 4 && !genres.includes(g)) genres.push(g);
+        });
+
+        const statusText = $('.detail-info-right-title-tip').first().text().trim();
+        const status = /completed/i.test(statusText) ? 'Completed' : 'Ongoing';
+
+        const ogUrl = $('meta[property="og:url"]').attr('content') || finalUrl || '';
+        const slug = ogUrl.split('/manga/')[1]?.replace(/\/+$/, '').split('/')[0] || `ff-${Date.now()}`;
+        const fanfoxUrl = `${FANFOX_BASE}/manga/${slug}/`;
+
+        results.push({
+            fanfoxId: slug,
+            fanfoxUrl,
+            sourceHost: 'fanfox.net',
+            title,
+            author,
+            cover: cover || 'https://placehold.co/400x600/1a1d30/f59e0b?text=FanFox.net',
+            genres: genres.length > 0 ? genres : ['Action', 'Manga'],
+            status,
+            rating: '9.6',
+            synopsis
+        });
+        return results;
+    }
+
+    // 2. Parse search / directory cards (.manga-list-4-list li, .manga-list-1-list li)
+    const seenUrls = new Set();
+    $('ul.manga-list-4-list li, ul.manga-list-1-list li, .manga-list-4 li').each((_, el) => {
+        const $el = $(el);
+        const $link = $el.find('p.manga-list-4-item-title a, p.manga-list-1-item-title a, a[href*="/manga/"]').first();
+        let href = ($link.attr('href') || '').trim();
+        if (!href || href === '#') return;
+        if (href.startsWith('//')) href = `https:${href}`;
+        else if (href.startsWith('/')) href = `${FANFOX_BASE}${href}`;
+        if (!href.startsWith('http') || seenUrls.has(href)) return;
+
+        const title = ($link.attr('title') || $link.text() || '').trim();
+        if (!title) return;
+        seenUrls.add(href);
+
+        const slug = href.split('/manga/')[1]?.replace(/\/+$/, '').split('/')[0] || `ff-${results.length + 1}`;
+        const $img = $el.find('img').first();
+        const rawImg = $img.attr('data-src') || $img.attr('src') || '';
+        const cover = normalizeAssetUrl(rawImg, FANFOX_BASE);
+
+        const authorText = $el.find('p.manga-list-4-item-tip a').first().text().trim();
+        const summaryText = $el.find('p.manga-list-4-item-tip').last().text().trim();
+
+        results.push({
+            fanfoxId: slug,
+            fanfoxUrl: href.endsWith('/') ? href : `${href}/`,
+            sourceHost: 'fanfox.net',
+            title,
+            author: authorText || 'FanFox Creator',
+            cover: cover || 'https://placehold.co/400x600/1a1d30/f59e0b?text=FanFox.net',
+            genres: ['Action', 'Manga'],
+            status: 'Ongoing',
+            rating: '9.6',
+            synopsis: summaryText || `Imported from FanFox.net (${title}).`
+        });
+    });
+
+    return results;
+}
+
+export function parseFanfoxChaptersHtml(html = '') {
+    const rawChapters = [];
+    const seenUrls = new Set();
+    if (!html) return rawChapters;
+
+    const $ = cheerio.load(html);
+    const chapterSelectors = '#list-2 ul.detail-main-list li a, ul.detail-main-list li a, .detail-main-list a, .chlist a[href*="/manga/"]';
+
+    $(chapterSelectors).each((_, el) => {
+        const $a = $(el);
+        let chUrl = ($a.attr('href') || '').trim();
+        if (!chUrl || chUrl === '#' || chUrl.startsWith('javascript:')) return;
+        if (chUrl.startsWith('//')) chUrl = `https:${chUrl}`;
+        else if (chUrl.startsWith('/')) chUrl = `${FANFOX_BASE}${chUrl}`;
+        if (!chUrl.startsWith('http') || seenUrls.has(chUrl)) return;
+        seenUrls.add(chUrl);
+
+        const rawTitle = (
+            $a.find('.detail-main-list-main p.title3').first().text().trim() ||
+            $a.find('p.title3').first().text().trim() ||
+            $a.attr('title') ||
+            $a.text().trim()
+        ).replace(/\s+/g, ' ');
+
+        const chMatch = chUrl.match(/\/c(\d+(?:\.\d+)?)\//i);
+        const titleNumMatch = rawTitle.match(/(?:ch(?:apter)?\.?\s*)(\d+(?:\.\d+)?)/i) || rawTitle.match(/(\d+(?:\.\d+)?)/);
+        const parsedNum = chMatch ? parseFloat(chMatch[1]) : (titleNumMatch ? parseFloat(titleNumMatch[1]) : null);
+
+        const cleanId = chMatch ? `c${chMatch[1]}` : `ch-${rawChapters.length + 1}`;
+        const displayTitle = rawTitle || (parsedNum !== null ? `Chapter ${parsedNum}` : `Chapter ${rawChapters.length + 1}`);
+
+        rawChapters.push({
+            id: cleanId,
+            url: chUrl,
+            title: displayTitle,
+            parsedNum
+        });
+    });
+
+    rawChapters.reverse();
+    const finalChapters = [];
+    const seenNumbers = new Set();
+
+    for (let idx = 0; idx < rawChapters.length; idx++) {
+        const ch = rawChapters[idx];
+        const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
+        if (seenNumbers.has(num)) continue;
+        seenNumbers.add(num);
+
+        finalChapters.push({
+            id: ch.id,
+            url: ch.url,
+            title: ch.title || `Chapter ${num}`,
+            number: num,
+            seqIndex: finalChapters.length + 1
+        });
+    }
+
+    return finalChapters;
+}
+
+export function toFanfoxRollUrl(chapterUrl = '') {
+    const clean = (chapterUrl || '').trim();
+    if (!clean) return '';
+    const pathMatch = clean.match(/\/(?:manga|roll_manga)\/(.+)$/i);
+    if (pathMatch) {
+        return `${FANFOX_MOBILE_BASE}/roll_manga/${pathMatch[1]}`;
+    }
+    return clean;
+}
+
+export function parseFanfoxPagesHtml(html = '') {
+    const pages = [];
+    const seen = new Set();
+    if (!html) return pages;
+
+    const $ = cheerio.load(html);
+
+    $('#viewer img, .mangaread-main img, .reader-main img').each((_, el) => {
+        const $img = $(el);
+        const rawSrc =
+            $img.attr('data-original') ||
+            $img.attr('data-src') ||
+            $img.attr('src') ||
+            '';
+        const cleanUrl = normalizeAssetUrl(rawSrc, FANFOX_BASE);
+        if (!cleanUrl || /logo|avatar|loading|blank/i.test(cleanUrl)) return;
+        if (!seen.has(cleanUrl)) {
+            seen.add(cleanUrl);
+            pages.push(cleanUrl);
+        }
+    });
+
+    if (pages.length > 0) return pages;
+
+    const newImgsMatch = html.match(/newImgs\s*=\s*\[([\s\S]*?)\]/i);
+    if (newImgsMatch) {
+        const urls = newImgsMatch[1]
+            .split(',')
+            .map(s => normalizeAssetUrl(s.trim().replace(/^['"]|['"]$/g, ''), FANFOX_BASE))
+            .filter(Boolean);
+        return urls;
+    }
+
+    return pages;
+}
+
+export async function fetchFanfoxSearch(query = '') {
+    const cleanQ = (query || '').trim();
+    let targetUrl = cleanQ
+        ? `${FANFOX_BASE}/search?title=${encodeURIComponent(cleanQ)}`
+        : `${FANFOX_BASE}/directory/`;
+
+    if (cleanQ.startsWith('http') && cleanQ.includes('fanfox.net')) {
+        targetUrl = cleanQ;
+    }
+
+    const { html, finalUrl } = await fetchHtmlWithFallback(targetUrl, FANFOX_HEADERS);
+    return parseFanfoxHtmlSearch(html, finalUrl || targetUrl, cleanQ);
+}
+
+export async function fetchFanfoxChapters(urlOrSlug = '') {
+    const clean = (urlOrSlug || '').trim();
+    const targetUrl = clean.startsWith('http')
+        ? clean
+        : `${FANFOX_BASE}/manga/${clean.replace(/^\/+|\/+$/g, '').replace(/^manga\//i, '')}/`;
+
+    const { html } = await fetchHtmlWithFallback(targetUrl, FANFOX_HEADERS);
+    return parseFanfoxChaptersHtml(html);
+}
+
+export async function fetchFanfoxPages(chapterUrl = '') {
+    const rollUrl = toFanfoxRollUrl(chapterUrl);
+    const { html } = await fetchHtmlWithFallback(rollUrl, {
+        ...FANFOX_HEADERS,
+        'Referer': 'https://m.fanfox.net/'
+    });
+    return parseFanfoxPagesHtml(html);
 }

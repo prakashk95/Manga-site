@@ -15,7 +15,8 @@ import {
     parseMgekoPagesHtml,
     fetchMangaFirePages,
     fetchComixPages,
-    fetchMgekoPages
+    fetchMgekoPages,
+    fetchFanfoxPages
 } from '@/lib/crawler';
 
 function AdSlotBanner({ slot }) {
@@ -166,9 +167,9 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 }
                 const found = list.find(m => {
                     const mSlug = (m.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-                    const shortHash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.mgekoId || m.id || '')
+                    const shortHash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.mgekoId || m.fanfoxId || m.id || '')
                         .toString()
-                        .replace(/^manga-(md|mk|mf|co|mg)-/i, '')
+                        .replace(/^manga-(md|mk|mf|co|mg|ff)-/i, '')
                         .slice(0, 8)
                         .toLowerCase();
                     const fullSlug = shortHash ? `${mSlug}-${shortHash}` : mSlug;
@@ -223,6 +224,28 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 let freshPages = json.pages || [];
                 if (freshPages.length === 0) {
                     freshPages = await fetchMangaFirePages(chapterObj.mangafireChapterId);
+                }
+                if (freshPages.length > 0) {
+                    chapterObj.pages = freshPages;
+                    chapterObj.pagesSaver = freshPages;
+                    await saveLocalChaptersBulk([chapterObj]);
+                    await fetch('/api/chapters', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(chapterObj)
+                    });
+                }
+            } catch (_) {}
+        } else if (needsRefresh && chapterObj.fanfoxChapterUrl) {
+            const rawFfUrl = chapterObj.fanfoxChapterUrl;
+            const ffUrl = rawFfUrl.startsWith('http') ? rawFfUrl : `https://fanfox.net${rawFfUrl.startsWith('/') ? '' : '/'}${rawFfUrl}`;
+            try {
+                let freshPages = [];
+                const res = await fetch(`/api/crawler/pages?source=fanfox&url=${encodeURIComponent(ffUrl)}`, { cache: 'no-store' });
+                const json = await res.json();
+                freshPages = json.pages || [];
+                if (freshPages.length === 0) {
+                    freshPages = await fetchFanfoxPages(ffUrl);
                 }
                 if (freshPages.length > 0) {
                     chapterObj.pages = freshPages;
@@ -377,7 +400,7 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
 
     const pages = currentChapter.pages || [];
     const ads = monetization?.ads || {};
-    const rawChUrl = currentChapter.mgekoChapterUrl || currentChapter.comixChapterUrl || currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
+    const rawChUrl = currentChapter.fanfoxChapterUrl || currentChapter.mgekoChapterUrl || currentChapter.comixChapterUrl || currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
     const activeChapterUrl = rawChUrl.startsWith('http')
         ? rawChUrl
         : (rawChUrl ? `https://mangakatana.com${rawChUrl.startsWith('/') ? '' : '/'}${rawChUrl}` : '');

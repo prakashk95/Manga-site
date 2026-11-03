@@ -4,7 +4,8 @@ import {
     formatMangaDexSearchData,
     fetchMangaFireSearch,
     fetchComixSearch,
-    fetchMgekoSearch
+    fetchMgekoSearch,
+    fetchFanfoxSearch
 } from '@/lib/crawler';
 
 const MANGADEX_API = 'https://api.mangadex.org';
@@ -14,13 +15,22 @@ export async function GET({ request }) {
     const url = new URL(request.url);
     const q = (url.searchParams.get('q') || '').trim();
     const rawSource = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
-    const source = q.includes('mgeko.cc')
+    const source = q.includes('fanfox.net')
+        ? 'fanfox'
+        : q.includes('mgeko.cc')
         ? 'mgeko'
         : q.includes('comix.to')
         ? 'comix'
         : rawSource;
 
-    if (source === 'mgeko') {
+    if (source === 'fanfox') {
+        try {
+            const results = await fetchFanfoxSearch(q);
+            return Response.json({ result: 'ok', data: results });
+        } catch (err) {
+            return Response.json({ error: err.message, data: [] }, { status: 500 });
+        }
+    } else if (source === 'mgeko') {
         try {
             const results = await fetchMgekoSearch(q);
             return Response.json({ result: 'ok', data: results });

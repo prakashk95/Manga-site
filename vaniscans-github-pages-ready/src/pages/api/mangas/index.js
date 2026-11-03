@@ -37,6 +37,9 @@ export async function POST({ request }) {
         if (existing.rows.length === 0 && manga.mgekoId) {
             existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE mgekoId = ?', args: [manga.mgekoId] });
         }
+        if (existing.rows.length === 0 && manga.fanfoxId) {
+            existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE fanfoxId = ?', args: [manga.fanfoxId] });
+        }
 
         const existingRow = existing.rows.length > 0 ? existing.rows[0] : null;
         const finalId = existingRow ? existingRow.id : manga.id;
@@ -53,7 +56,7 @@ export async function POST({ request }) {
 
         await db.execute({
             sql: `INSERT INTO mangas (
-                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl, mgekoId, mgekoUrl,
+                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl, mgekoId, mgekoUrl, fanfoxId, fanfoxUrl,
                 title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
@@ -65,6 +68,8 @@ export async function POST({ request }) {
                 comixUrl = excluded.comixUrl,
                 mgekoId = excluded.mgekoId,
                 mgekoUrl = excluded.mgekoUrl,
+                fanfoxId = excluded.fanfoxId,
+                fanfoxUrl = excluded.fanfoxUrl,
                 title = excluded.title,
                 author = excluded.author,
                 cover = excluded.cover,
@@ -86,6 +91,8 @@ export async function POST({ request }) {
                 manga.comixUrl || null,
                 manga.mgekoId || null,
                 manga.mgekoUrl || null,
+                manga.fanfoxId || null,
+                manga.fanfoxUrl || null,
                 manga.title,
                 manga.author || 'Author Unknown',
                 manga.cover || '',

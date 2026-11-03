@@ -12,6 +12,14 @@ export async function GET({ request }) {
 
         let referer = 'https://mangakatana.com/';
         if (
+            source === 'fanfox' ||
+            targetUrl.includes('fanfox.net') ||
+            targetUrl.includes('zjcdn.com') ||
+            targetUrl.includes('mfcdn') ||
+            chapterUrl.includes('fanfox.net')
+        ) {
+            referer = 'https://fanfox.net/';
+        } else if (
             source === 'mgeko' ||
             targetUrl.includes('mgeko.cc') ||
             targetUrl.includes('imgsrv') ||
