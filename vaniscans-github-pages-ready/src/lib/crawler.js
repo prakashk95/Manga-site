@@ -637,7 +637,7 @@ export async function fetchComixPages(chapterUrl = '') {
 export const MANGAFIRE_API_BASE =
     (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.PUBLIC_MANGAFIRE_API_URL || import.meta.env.MANGAFIRE_API_URL)) ||
     (typeof process !== 'undefined' && process.env && (process.env.PUBLIC_MANGAFIRE_API_URL || process.env.MANGAFIRE_API_URL)) ||
-    'http://localhost:3001/api';
+    'https://mangafire-api.fly.dev'; // Switched to a public hosted instance instead of localhost
 
 export async function fetchMangaFireSearch(query = '', page = 1) {
     const baseUrl = MANGAFIRE_API_BASE.replace(/\/+$/, '');
