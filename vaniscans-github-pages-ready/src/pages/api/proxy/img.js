@@ -72,6 +72,7 @@ export async function GET({ request }) {
 
         // Try direct fetch first
         let imgRes = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(8000) }).catch(() => null);
+        const directStatus = imgRes ? imgRes.status : 'network error';
 
         // Fallback to wsrv.nl CDN proxy if direct fetch is blocked by IP restrictions
         if (!imgRes || !imgRes.ok) {
@@ -81,7 +82,7 @@ export async function GET({ request }) {
         }
 
         if (!imgRes || !imgRes.ok) {
-            return new Response('Upstream image load failed', { status: 502 });
+            return new Response(`Upstream image load failed (direct: ${directStatus}, fallback: ${imgRes ? imgRes.status : 'network error'}) for ${targetUrl}`, { status: 502 });
         }
 
         const contentType = imgRes.headers.get('content-type') || 'image/jpeg';

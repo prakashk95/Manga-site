@@ -565,6 +565,19 @@ export default function AdminPanelPage() {
                 ? `manga-mk-${(item.mangakatanaId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
                 : `manga-md-${(item.mangadexId || Date.now()).toString().slice(0, 8)}`;
 
+            // FanFox: the search-list thumbnail is often missing/expired, so read the cover from the series page itself
+            let finalCover = item.cover;
+            if (isFanfox) {
+                try {
+                    const detailUrl = (item.fanfoxUrl || '').startsWith('http')
+                        ? item.fanfoxUrl
+                        : `https://fanfox.net/manga/${(item.fanfoxId || '').replace(/^\/+|\/+$/g, '')}/`;
+                    const detailHtml = await fetchClientHtmlFallback(detailUrl);
+                    const detail = parseFanfoxHtmlSearch(detailHtml, detailUrl, item.title)[0];
+                    if (detail?.cover && !/placehold\.co/i.test(detail.cover)) finalCover = detail.cover;
+                } catch (_) {}
+            }
+
             const mangaPayload = {
                 id: defaultId,
                 mangadexId: item.mangadexId || null,
@@ -579,8 +592,8 @@ export default function AdminPanelPage() {
                 fanfoxUrl: item.fanfoxUrl || null,
                 title: item.title,
                 author: item.author || 'Manga Creator',
-                cover: item.cover,
-                banner: item.cover,
+                cover: finalCover,
+                banner: finalCover,
                 genres: item.genres || ['Action'],
                 status: item.status || 'Ongoing',
                 rating: parseFloat(item.rating) || 9.6,
