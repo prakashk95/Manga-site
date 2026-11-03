@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import { mergeMonetization } from '@/lib/monetization';
 import {
@@ -63,6 +63,20 @@ function MangaPageImage({ rawUrl, pageNum, chapterUrl = '' }) {
     const [sourceIndex, setSourceIndex] = useState(0);
     const [loaded, setLoaded] = useState(false);
     const [failed, setFailed] = useState(false);
+    const wrapRef = useRef(null);
+    // Start loading a page when it is within ~3 screens of the viewport (native lazy-load starts too late)
+    const [near, setNear] = useState(pageNum <= 4);
+
+    useEffect(() => {
+        if (near) return;
+        const el = wrapRef.current;
+        if (!el || typeof IntersectionObserver === 'undefined') { setNear(true); return; }
+        const io = new IntersectionObserver((entries) => {
+            if (entries.some(e => e.isIntersecting)) { setNear(true); io.disconnect(); }
+        }, { rootMargin: '3000px 0px' });
+        io.observe(el);
+        return () => io.disconnect();
+    }, [near]);
 
     useEffect(() => {
         setSourceIndex(0);
@@ -82,7 +96,7 @@ function MangaPageImage({ rawUrl, pageNum, chapterUrl = '' }) {
     const currentSrc = sources[sourceIndex] || rawUrl;
 
     return (
-        <div className="w-full max-w-[900px] mx-auto bg-[#0d0f1a] relative flex flex-col items-center justify-center min-h-[300px]">
+        <div ref={wrapRef} className="w-full max-w-[900px] mx-auto bg-[#0d0f1a] relative flex flex-col items-center justify-center min-h-[300px]">
             {!loaded && !failed && (
                 <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs w-full">
                     <div className="w-7 h-7 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
@@ -93,11 +107,12 @@ function MangaPageImage({ rawUrl, pageNum, chapterUrl = '' }) {
                 <div className="py-12 text-center text-rose-400 text-xs">
                     Failed to load Page {pageNum}. <button onClick={() => { setSourceIndex(0); setFailed(false); }} className="underline font-bold ml-1">Retry</button>
                 </div>
-            ) : (
+            ) : near && (
                 <img
                     src={currentSrc}
                     alt={`Page ${pageNum}`}
-                    loading={pageNum <= 3 ? "eager" : "lazy"}
+                    loading="eager"
+                    fetchPriority={pageNum <= 2 ? "high" : "auto"}
                     decoding="async"
                     referrerPolicy={sourceIndex === 0 ? "strict-origin-when-cross-origin" : "no-referrer"}
                     onLoad={() => setLoaded(true)}
