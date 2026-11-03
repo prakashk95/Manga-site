@@ -286,12 +286,14 @@ export function parseMangaKatanaPagesHtml(html) {
 
 export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
     const headersToUse = customHeaders || (targetUrl.includes('comix.to') ? COMIX_HEADERS : MK_HEADERS);
+
+    // Try direct fetch first
     try {
         const directRes = await fetch(targetUrl, {
             headers: headersToUse,
             redirect: 'follow',
             cache: 'no-store',
-            signal: AbortSignal.timeout(9000)
+            signal: AbortSignal.timeout(8000)
         });
         if (directRes.ok) {
             const html = await directRes.text();
@@ -301,17 +303,20 @@ export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
         }
     } catch (_) {}
 
+    // Add more proxy relays to bypass Cloudflare bot detection
     const relays = [
         { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, json: true },
         { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, json: false },
-        { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, json: false }
+        { url: `https://r.jina.ai/${targetUrl}`, json: false },
+        { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, json: false },
+        { url: `https://cors-anywhere.herokuapp.com/${targetUrl}`, json: false }
     ];
 
     for (const relay of relays) {
         try {
             const res = await fetch(relay.url, {
                 cache: 'no-store',
-                signal: AbortSignal.timeout(10000)
+                signal: AbortSignal.timeout(12000)
             });
             if (!res.ok) continue;
 
@@ -322,14 +327,15 @@ export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
                 }
             } else {
                 const text = await res.text();
-                if (!isCloudflareOrBlockedHtml(text)) {
+                // If it's from Jina, it might be markdown but still contains the data we need
+                if (!isCloudflareOrBlockedHtml(text) || relay.url.includes('jina.ai')) {
                     return { html: text, finalUrl: targetUrl };
                 }
             }
         } catch (_) {}
     }
 
-    throw new Error('Upstream source blocked automated requests.');
+    throw new Error('Upstream host blocked automated requests.');
 }
 
 // ============================================================================
@@ -392,9 +398,15 @@ export function parseComixHtmlSearch(html = '', finalUrl = '', fallbackQuery = '
             if (data.queries) {
                 for (const key in data.queries) {
                     const q = JSON.parse(key);
-                    if (q[0] === 'manga' && q[1] === 'list' && q[2]?.scope === 'hot') {
-                        const items = data.queries[key].items || [];
-                        for (const item of items) {
+                    // Search query results: ["manga","search",{"q":"query",...}]
+                    const isSearchQuery = q[0] === 'manga' && q[1] === 'search';
+                    const isHotList = q[0] === 'manga' && q[1] === 'list' && q[2]?.scope === 'hot';
+
+                    if (isSearchQuery || isHotList) {
+                        const items = (data.queries[key].items || data.queries[key]) || [];
+                        const finalItems = Array.isArray(items) ? items : (items.items || []);
+
+                        for (const item of finalItems) {
                             const mangaUrl = `${COMIX_BASE}/title/${item.hid}`;
                             if (seenUrls.has(mangaUrl)) continue;
                             seenUrls.add(mangaUrl);
