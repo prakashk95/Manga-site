@@ -155,6 +155,18 @@ export default function CatalogInteractive({ initialMangas = [] }) {
 
     const getMangaSlug = (m) => {
         if (!m) return 'series';
+        if (m.customSlug && typeof m.customSlug === 'string' && m.customSlug.trim()) {
+            const cleanCustom = m.customSlug
+                .trim()
+                .replace(/^https?:\/\/[^/]+\/(?:comics\/)?/i, '')
+                .replace(/^\/?comics\//i, '')
+                .split('/')[0]
+                .toLowerCase()
+                .replace(/[^a-z0-9-]+/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-+|-+$/g, '');
+            if (cleanCustom) return cleanCustom;
+        }
         const base = (m.title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.mgekoId || m.fanfoxId || m.id || '')
             .toString()

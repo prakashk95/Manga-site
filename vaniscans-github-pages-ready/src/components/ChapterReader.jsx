@@ -181,6 +181,16 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                     return;
                 }
                 const found = list.find(m => {
+                    const customSlug = (m.customSlug || '')
+                        .toString()
+                        .trim()
+                        .replace(/^https?:\/\/[^/]+\/(?:comics\/)?/i, '')
+                        .replace(/^\/?comics\//i, '')
+                        .split('/')[0]
+                        .toLowerCase()
+                        .replace(/[^a-z0-9-]+/g, '-')
+                        .replace(/-+/g, '-')
+                        .replace(/^-+|-+$/g, '');
                     const mSlug = (m.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
                     const shortHash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.mgekoId || m.fanfoxId || m.id || '')
                         .toString()
@@ -188,7 +198,13 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                         .slice(0, 8)
                         .toLowerCase();
                     const fullSlug = shortHash ? `${mSlug}-${shortHash}` : mSlug;
-                    return fullSlug === slug.toLowerCase() || mSlug === slug.toLowerCase() || (m.id || '').toLowerCase() === slug.toLowerCase();
+                    const targetSlug = slug.toLowerCase();
+                    return (
+                        (customSlug && customSlug === targetSlug) ||
+                        fullSlug === targetSlug ||
+                        mSlug === targetSlug ||
+                        (m.id || '').toLowerCase() === targetSlug
+                    );
                 });
 
                 if (found) {

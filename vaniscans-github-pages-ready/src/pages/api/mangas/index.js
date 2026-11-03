@@ -1,4 +1,4 @@
-import { getDb, getServerCatalogWithChapters, invalidateDbCache } from '@/lib/db';
+import { getDb, getServerCatalogWithChapters, invalidateDbCache, sanitizeSlugStr } from '@/lib/db';
 
 export async function GET() {
     try {
@@ -54,11 +54,15 @@ export async function POST({ request }) {
             ? manga.metaDescription.trim()
             : (existingRow?.metaDescription || `Read ${manga.title} / ${manga.synopsis || 'Read online on VaniScans.'}`);
 
+        const customSlug = typeof manga.customSlug === 'string'
+            ? sanitizeSlugStr(manga.customSlug)
+            : (existingRow?.customSlug ? sanitizeSlugStr(existingRow.customSlug) : '');
+
         await db.execute({
             sql: `INSERT INTO mangas (
                 id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl, mgekoId, mgekoUrl, fanfoxId, fanfoxUrl,
-                title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription, customSlug
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 mangadexId = excluded.mangadexId,
                 mangakatanaId = excluded.mangakatanaId,
@@ -80,7 +84,8 @@ export async function POST({ request }) {
                 synopsis = excluded.synopsis,
                 updatedAt = excluded.updatedAt,
                 metaTitle = excluded.metaTitle,
-                metaDescription = excluded.metaDescription`,
+                metaDescription = excluded.metaDescription,
+                customSlug = excluded.customSlug`,
             args: [
                 finalId,
                 manga.mangadexId || null,
@@ -103,12 +108,13 @@ export async function POST({ request }) {
                 manga.synopsis || '',
                 updatedAt,
                 metaTitle,
-                metaDescription
+                metaDescription,
+                customSlug
             ]
         });
 
         invalidateDbCache();
-        return Response.json({ ...manga, id: finalId, metaTitle, metaDescription, updatedAt });
+        return Response.json({ ...manga, id: finalId, metaTitle, metaDescription, customSlug, updatedAt });
     } catch (err) {
         return Response.json({ error: err.message }, { status: 500 });
     }

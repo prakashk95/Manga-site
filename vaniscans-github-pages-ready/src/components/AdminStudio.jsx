@@ -51,6 +51,7 @@ export default function AdminPanelPage() {
     const [synopsis, setSynopsis] = useState('');
     const [metaTitle, setMetaTitle] = useState('');
     const [metaDescription, setMetaDescription] = useState('');
+    const [customSlug, setCustomSlug] = useState('');
     const [editChapters, setEditChapters] = useState([]);
     const [chapterFilterQuery, setChapterFilterQuery] = useState('');
 
@@ -160,12 +161,39 @@ export default function AdminPanelPage() {
         reader.readAsDataURL(file);
     };
 
+    const sanitizeCustomSlugInput = (val = '') => {
+        return (val || '')
+            .toString()
+            .trim()
+            .replace(/^https?:\/\/[^/]+\/(?:comics\/)?/i, '')
+            .replace(/^\/?comics\//i, '')
+            .split('/')[0]
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-+|-+$/g, '');
+    };
+
+    const getAutoSeriesSlug = (mObj) => {
+        const t = (mObj?.title ?? title ?? 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        const hash = (mObj?.mangadexId || mObj?.mangakatanaId || mObj?.mangafireId || mObj?.comixId || mObj?.mgekoId || mObj?.fanfoxId || mObj?.id || editingId || '')
+            .toString()
+            .replace(/^manga-(md|mk|mf|co|mg|ff)-/i, '')
+            .slice(0, 8)
+            .toLowerCase();
+        return hash ? `${t}-${hash}` : t;
+    };
+
     const handleSaveSeries = async (e) => {
         e.preventDefault();
         const finalMetaTitle = metaTitle.trim() || `Read ${title} - VaniScans`;
         const finalMetaDescription = metaDescription.trim() || `Read ${title} / ${synopsis || 'Read manga, manhwa and webtoons online on VaniScans.'}`;
 
+        const existingMangaObj = editingId ? mangas.find(m => m.id === editingId) : null;
+        const cleanedCustomSlug = sanitizeCustomSlugInput(customSlug);
+
         const mangaData = {
+            ...(existingMangaObj || {}),
             id: editingId || `manga-${Date.now()}`,
             title,
             author: author || 'Studio Original',
@@ -177,6 +205,7 @@ export default function AdminPanelPage() {
             synopsis: synopsis || 'No synopsis provided.',
             metaTitle: finalMetaTitle,
             metaDescription: finalMetaDescription,
+            customSlug: cleanedCustomSlug,
             updatedAt: Date.now()
         };
 
@@ -207,6 +236,7 @@ export default function AdminPanelPage() {
         setSynopsis(manga.synopsis || '');
         setMetaTitle(manga.metaTitle || `Read ${manga.title} - VaniScans`);
         setMetaDescription(manga.metaDescription || `Read ${manga.title} / ${manga.synopsis || 'Read manga, manhwa and webtoons online on VaniScans.'}`);
+        setCustomSlug(manga.customSlug || getAutoSeriesSlug(manga));
 
         try {
             const chs = await fetchAndSyncChapters(manga.id);
@@ -237,6 +267,7 @@ export default function AdminPanelPage() {
         setSynopsis('');
         setMetaTitle('');
         setMetaDescription('');
+        setCustomSlug('');
         setEditChapters([]);
         setChapterFilterQuery('');
     };
@@ -1023,6 +1054,49 @@ export default function AdminPanelPage() {
 
                                     <div className="grid grid-cols-1 gap-4">
                                         <div>
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1">
+                                                <label className="block text-xs font-semibold text-slate-300">
+                                                    Custom Series Slug / URL Path (Editable Manga URL)
+                                                </label>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const base = (title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                                                            setCustomSlug(base);
+                                                        }}
+                                                        className="text-[11px] text-purple-400 hover:text-purple-300 font-bold"
+                                                    >
+                                                        Use Title Only
+                                                    </button>
+                                                    <span className="text-slate-600">•</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCustomSlug(getAutoSeriesSlug())}
+                                                        className="text-[11px] text-slate-400 hover:text-slate-200 font-semibold"
+                                                    >
+                                                        Reset Default
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center bg-[#121422] border border-[#292d4b] rounded-xl overflow-hidden focus-within:border-purple-500">
+                                                <span className="px-3 py-2.5 text-xs text-slate-400 bg-[#181b2e] border-r border-[#292d4b] font-mono select-none shrink-0">
+                                                    https://vaniscans.online/comics/
+                                                </span>
+                                                <input
+                                                    type="text"
+                                                    value={customSlug}
+                                                    onChange={e => setCustomSlug(e.target.value)}
+                                                    onBlur={e => setCustomSlug(sanitizeCustomSlugInput(e.target.value))}
+                                                    placeholder={getAutoSeriesSlug() || 'starting-the-villainess-life-with-0-gold'}
+                                                    className="w-full bg-transparent px-3 py-2.5 text-xs sm:text-sm text-white font-mono focus:outline-none"
+                                                />
+                                            </div>
+                                            <p className="text-[11px] text-slate-400 mt-1">
+                                                You can type a custom slug (e.g. <code className="text-purple-300">starting-the-villainess-life-with-0-gold</code>) or paste a full URL and it will automatically format the slug.
+                                            </p>
+                                        </div>
+                                        <div>
                                             <label className="block text-xs font-semibold text-slate-300 mb-1">
                                                 Meta Title (Browser Tab Name & Search Result Headline)
                                             </label>
@@ -1058,7 +1132,7 @@ export default function AdminPanelPage() {
                                             <div className="leading-tight">
                                                 <div className="font-semibold text-[13px] text-slate-900">vaniscans.online</div>
                                                 <div className="text-[11px] text-slate-500">
-                                                    https://vaniscans.online/comics/{(title || 'infinite-mage').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}
+                                                    https://vaniscans.online/comics/{sanitizeCustomSlugInput(customSlug) || getAutoSeriesSlug() || 'infinite-mage'}
                                                 </div>
                                             </div>
                                         </div>

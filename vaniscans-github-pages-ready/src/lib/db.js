@@ -46,7 +46,8 @@ const SCHEMA_STATEMENTS = [
         synopsis TEXT,
         updatedAt INTEGER,
         metaTitle TEXT,
-        metaDescription TEXT
+        metaDescription TEXT,
+        customSlug TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS chapters (
         id TEXT PRIMARY KEY,
@@ -96,7 +97,8 @@ const MIGRATION_STATEMENTS = [
     `ALTER TABLE chapters ADD COLUMN mgekoChapterUrl TEXT`,
     `ALTER TABLE mangas ADD COLUMN fanfoxId TEXT`,
     `ALTER TABLE mangas ADD COLUMN fanfoxUrl TEXT`,
-    `ALTER TABLE chapters ADD COLUMN fanfoxChapterUrl TEXT`
+    `ALTER TABLE chapters ADD COLUMN fanfoxChapterUrl TEXT`,
+    `ALTER TABLE mangas ADD COLUMN customSlug TEXT`
 ];
 
 export async function loadTursoRuntimeConfig() {
@@ -174,7 +176,20 @@ export async function getDb() {
     };
 }
 
-export function getMangaSlug(m) {
+export function sanitizeSlugStr(raw = '') {
+    return (raw || '')
+        .toString()
+        .trim()
+        .replace(/^https?:\/\/[^/]+\/(?:comics\/)?/i, '')
+        .replace(/^\/?comics\//i, '')
+        .split('/')[0]
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+export function getDefaultMangaSlug(m) {
     if (!m) return 'series';
     const base = (m.title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.mgekoId || m.fanfoxId || m.id || '')
@@ -183,6 +198,15 @@ export function getMangaSlug(m) {
         .slice(0, 8)
         .toLowerCase();
     return hash ? `${base}-${hash}` : base;
+}
+
+export function getMangaSlug(m) {
+    if (!m) return 'series';
+    if (m.customSlug && typeof m.customSlug === 'string') {
+        const cleaned = sanitizeSlugStr(m.customSlug);
+        if (cleaned) return cleaned;
+    }
+    return getDefaultMangaSlug(m);
 }
 
 export async function getServerCatalogWithChapters() {
@@ -237,6 +261,7 @@ export async function getServerCatalogWithChapters() {
                 synopsis: r.synopsis || '',
                 metaTitle: r.metaTitle || '',
                 metaDescription: r.metaDescription || '',
+                customSlug: r.customSlug || '',
                 latestChapters: chaptersByMangaId[r.id] || [],
                 updatedAt: Number(r.updatedAt) || Date.now()
             };
@@ -249,10 +274,44 @@ export async function getServerMangaBySlug(slug = '') {
     const catalog = await getServerCatalogWithChapters();
     const found = catalog.find(m => {
         const fullSlug = getMangaSlug(m);
+        const defaultSlug = getDefaultMangaSlug(m);
         const mSlug = (m.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-        return fullSlug === cleanSlug || mSlug === cleanSlug || (m.id || '').toLowerCase() === cleanSlug;
+        return (
+            fullSlug === cleanSlug ||
+            defaultSlug === cleanSlug ||
+            mSlug === cleanSlug ||
+            (m.id || '').toLowerCase() === cleanSlug
+        );
     });
-    if (!found) return { manga: null, chapters: [] };
+    if (!found) return { manga: null, chapters: [], relatedMangas: [] };
+
+    const targetGenres = new Set(
+        (Array.isArray(found.genres) ? found.genres : [])
+            .map(g => (g || '').toString().toLowerCase().trim())
+            .filter(Boolean)
+    );
+
+    const relatedMangas = catalog
+        .filter(m => m.id !== found.id)
+        .map(m => {
+            const mGenres = (Array.isArray(m.genres) ? m.genres : [])
+                .map(g => (g || '').toString().toLowerCase().trim())
+                .filter(Boolean);
+            let sharedCount = 0;
+            for (const g of mGenres) {
+                if (targetGenres.has(g)) sharedCount += 1;
+            }
+            return { manga: m, sharedCount };
+        })
+        .sort((a, b) => {
+            if (b.sharedCount !== a.sharedCount) return b.sharedCount - a.sharedCount;
+            if ((Number(b.manga.rating) || 0) !== (Number(a.manga.rating) || 0)) {
+                return (Number(b.manga.rating) || 0) - (Number(a.manga.rating) || 0);
+            }
+            return (Number(b.manga.updatedAt) || 0) - (Number(a.manga.updatedAt) || 0);
+        })
+        .slice(0, 4)
+        .map(entry => entry.manga);
 
     const chapters = await getCachedQuery(`manga_chapters_${found.id}`, 60000, async () => {
         const db = await getDb();
@@ -284,5 +343,5 @@ export async function getServerMangaBySlug(slug = '') {
         });
     });
 
-    return { manga: found, chapters };
+    return { manga: found, chapters, relatedMangas };
 }
