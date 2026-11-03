@@ -17,6 +17,8 @@ export async function GET({ request }) {
             referer = 'https://mangadex.org/';
         } else if (source === 'mangafire' || targetUrl.includes('mangafire')) {
             referer = 'https://mangafire.to/';
+        } else if (source === 'comix' || targetUrl.includes('comix.to')) {
+            referer = 'https://comix.to/';
         }
 
         if (mode === 'html') {

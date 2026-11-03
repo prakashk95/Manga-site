@@ -2,6 +2,8 @@ import {
     parseMangaKatanaPagesHtml,
     fetchHtmlWithFallback,
     fetchMangaFirePages
+,
+    fetchComixPages
 } from '@/lib/crawler';
 
 const MANGADEX_API = 'https://api.mangadex.org';

@@ -2,8 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 
-import { DEFAULT_MONETIZATION, mergeMonetization } from '@/lib/monetization';
 import {
+    fetchComixSearch,
+    fetchComixChapters,
+    fetchComixPages, DEFAULT_MONETIZATION, mergeMonetization } from '@/lib/monetization';
+import {
+    fetchComixSearch,
+    fetchComixChapters,
+    fetchComixPages,
     verifyAdminCredentials,
     fetchAndSyncMangas,
     fetchAndSyncChapters,
@@ -13,6 +19,9 @@ import {
     deleteLocalChapter
 } from '@/lib/clientStorage';
 import {
+    fetchComixSearch,
+    fetchComixChapters,
+    fetchComixPages,
     parseMangaKatanaHtmlSearch,
     parseMangaKatanaChaptersHtml,
     parseMangaKatanaPagesHtml,
@@ -340,6 +349,7 @@ export default function AdminPanelPage() {
 
         let activeSrc = forceSource || crawlerSource;
         else if (q.includes('mangakatana.com')) activeSrc = 'mangakatana';
+        else if (q.includes('comix.to')) activeSrc = 'comix';
             setCrawlerSource(activeSrc);
         }
 
@@ -412,6 +422,7 @@ export default function AdminPanelPage() {
         setCrawlChapterFilter('');
         const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
         const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
+        const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
         setScannerStatus(`Loading full chapter list for "${item.title}"...`);
 
         try {
@@ -486,6 +497,7 @@ export default function AdminPanelPage() {
             const item = selectedMangaToCrawl;
             const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
             const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
+        const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
                 : isMangaFire
                 ? `manga-mf-${(item.mangafireId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
                 : isKatana
@@ -564,6 +576,7 @@ export default function AdminPanelPage() {
                         id: `${targetMangaId}-${prefix}-${ch.id || i}`,
                         mangaId: targetMangaId,
                         mangakatanaChapterUrl: isKatana ? (ch.url || null) : null,
+                        comixChapterUrl: isComix ? (ch.url || null) : null,
                         mangafireChapterId: ch.mangafireChapterId || (isMangaFire ? ch.id : null),
                         title: ch.title,
                         number: typeof ch.number === 'number' && !isNaN(ch.number) ? ch.number : (i + 1),
@@ -1124,6 +1137,9 @@ export default function AdminPanelPage() {
                                 <button type="button" onClick={() => handleScan('One Piece', 'mangafire')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-orange-600/30 text-orange-300 border border-orange-500/30 text-[11px] font-bold transition">
                                     One Piece (MangaFire)
                                 </button>
+                                <button type="button" onClick={() => handleScan('Batman', 'comix')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold transition">
+                                    Batman (Comix)
+                                </button>
                                 </button>
                             </div>
 
@@ -1197,6 +1213,7 @@ export default function AdminPanelPage() {
                                             {scannedResults.map((item, idx) => {
                                                 const isKatanaItem = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
                                                 const isMangaFireItem = item.sourceHost === 'mangafire' || !!item.mangafireId;
+                                                const isComixItem = item.sourceHost === 'comix.to' || !!item.comixId;
                                                 return (
                                                     <div key={idx} className="bg-[#181b2e] border border-[#292d4b] hover:border-purple-500/50 rounded-2xl p-4 flex flex-col justify-between gap-3 transition">
                                                         <div className="flex gap-3.5">

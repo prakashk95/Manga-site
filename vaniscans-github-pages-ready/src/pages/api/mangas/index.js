@@ -28,6 +28,9 @@ export async function POST({ request }) {
         if (existing.rows.length === 0 && manga.mangakatanaId) {
             existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE mangakatanaId = ?', args: [manga.mangakatanaId] });
         }
+        if (existing.rows.length === 0 && manga.comixId) {
+            existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE comixId = ?', args: [manga.comixId] });
+        }
         if (existing.rows.length === 0 && manga.mangafireId) {
             existing = await db.execute({ sql: 'SELECT * FROM mangas WHERE mangafireId = ?', args: [manga.mangafireId] });
         }
@@ -47,14 +50,16 @@ export async function POST({ request }) {
 
         await db.execute({
             sql: `INSERT INTO mangas (
-                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId,
+                id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl,
                 title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 mangadexId = excluded.mangadexId,
                 mangakatanaId = excluded.mangakatanaId,
                 mangakatanaUrl = excluded.mangakatanaUrl,
                 mangafireId = excluded.mangafireId,
+                comixId = excluded.comixId,
+                comixUrl = excluded.comixUrl,
                 title = excluded.title,
                 author = excluded.author,
                 cover = excluded.cover,
@@ -72,6 +77,8 @@ export async function POST({ request }) {
                 manga.mangakatanaId || null,
                 manga.mangakatanaUrl || null,
                 manga.mangafireId || null,
+                manga.comixId || null,
+                manga.comixUrl || null,
                 manga.title,
                 manga.author || 'Author Unknown',
                 manga.cover || '',

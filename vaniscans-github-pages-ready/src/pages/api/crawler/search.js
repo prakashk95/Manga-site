@@ -3,6 +3,8 @@ import {
     fetchHtmlWithFallback,
     formatMangaDexSearchData,
     fetchMangaFireSearch
+,
+    fetchComixSearch
 } from '@/lib/crawler';
 
 const MANGADEX_API = 'https://api.mangadex.org';
