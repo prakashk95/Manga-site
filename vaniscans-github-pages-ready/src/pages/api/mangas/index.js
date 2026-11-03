@@ -58,7 +58,7 @@ export async function POST({ request }) {
             sql: `INSERT INTO mangas (
                 id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl, mgekoId, mgekoUrl, fanfoxId, fanfoxUrl,
                 title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 mangadexId = excluded.mangadexId,
                 mangakatanaId = excluded.mangakatanaId,

@@ -596,6 +596,7 @@ export default function AdminPanelPage() {
                 body: JSON.stringify(mangaPayload)
             });
             const savedManga = await savedMangaRes.json();
+            if (!savedMangaRes.ok) throw new Error(savedManga?.error || 'Server failed to save the series');
             const targetMangaId = savedManga?.id || defaultId;
             await saveLocalManga({ ...mangaPayload, id: targetMangaId });
 
