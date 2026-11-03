@@ -1,8 +1,7 @@
 import {
     parseMangaKatanaPagesHtml,
     fetchHtmlWithFallback,
-    fetchMangaFirePages
-,
+    fetchMangaFirePages,
     fetchComixPages
 } from '@/lib/crawler';
 
@@ -15,9 +14,20 @@ const NO_STORE_HEADERS = {
 export async function GET({ request }) {
     const url = new URL(request.url);
     const targetUrlParam = (url.searchParams.get('url') || '').trim();
-    const source = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
+    const rawSource = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
+    const source = targetUrlParam.includes('comix.to') ? 'comix' : rawSource;
 
-    if (source === 'mangafire') {
+    if (source === 'comix') {
+        if (!targetUrlParam) {
+            return Response.json({ error: 'Valid Comix.to chapter url required' }, { status: 400, headers: NO_STORE_HEADERS });
+        }
+        try {
+            const pages = await fetchComixPages(targetUrlParam);
+            return Response.json({ result: 'ok', pages, pagesSaver: pages }, { headers: NO_STORE_HEADERS });
+        } catch (err) {
+            return Response.json({ error: err.message, pages: [], pagesSaver: [] }, { status: 500, headers: NO_STORE_HEADERS });
+        }
+    } else if (source === 'mangafire') {
         const chapterId = (url.searchParams.get('chapterId') || '').trim();
         if (!chapterId) {
             return Response.json({ error: 'Missing chapterId' }, { status: 400, headers: NO_STORE_HEADERS });

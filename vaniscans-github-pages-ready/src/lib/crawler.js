@@ -1,5 +1,6 @@
 const USER_AGENT = 'VaniScans/5.0 (+https://vaniscans.online)';
 const MANGAKATANA_BASE = 'https://mangakatana.com';
+export const COMIX_BASE = 'https://comix.to';
 
 export const MK_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -8,6 +9,13 @@ export const MK_HEADERS = {
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
     'Referer': 'https://mangakatana.com/'
+};
+
+export const COMIX_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://comix.to/'
 };
 
 export function isCloudflareOrBlockedHtml(html = '') {
@@ -276,10 +284,11 @@ export function parseMangaKatanaPagesHtml(html) {
     return fallbackUrls;
 }
 
-export async function fetchHtmlWithFallback(targetUrl) {
+export async function fetchHtmlWithFallback(targetUrl, customHeaders = null) {
+    const headersToUse = customHeaders || (targetUrl.includes('comix.to') ? COMIX_HEADERS : MK_HEADERS);
     try {
         const directRes = await fetch(targetUrl, {
-            headers: MK_HEADERS,
+            headers: headersToUse,
             redirect: 'follow',
             cache: 'no-store',
             signal: AbortSignal.timeout(9000)
@@ -320,12 +329,225 @@ export async function fetchHtmlWithFallback(targetUrl) {
         } catch (_) {}
     }
 
-    throw new Error('Upstream source blocked automated requests. Use the "Paste Page HTML" option below.');
+    throw new Error('Upstream source blocked automated requests.');
+}
+
+// ============================================================================
+// COMIX.TO SCRAPER FUNCTIONS (Matches User's FastAPI BeautifulSoup Selectors)
+// ============================================================================
+
+export function parseComixHtmlSearch(html = '', finalUrl = '', fallbackQuery = '') {
+    const results = [];
+    if (!html) return results;
+
+    // 1. Check if single comic detail page (e.g. https://comix.to/comic/manga-slug)
+    const isDetailPage =
+        (finalUrl && /\/comic\/[^/?#]+/i.test(finalUrl)) ||
+        ((html.includes('id="chapter-list"') || html.includes('class="chapters-list"') || html.includes('class="comic-poster"')) &&
+         !html.includes('/search?q='));
+
+    if (isDetailPage) {
+        const titleMatch =
+            html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
+            html.match(/<[^>]+class="[^"]*comic-title[^"]*"[^>]*>([\s\S]*?)<\/[a-z0-9]+>/i);
+        const descMatch =
+            html.match(/<[^>]+class="[^"]*(?:description|summary|comic-description|text-muted)[^"]*"[^>]*>([\s\S]*?)<\/[a-z0-9]+>/i);
+        const coverMatch =
+            html.match(/<div[^>]+class="[^"]*(?:comic-poster|profile-manga)[^"]*"[^>]*>[\s\S]*?<img[^>]+(?:data-src|src)=["']([^"']+)["']/i) ||
+            html.match(/<meta[^>]+property="og:image"[^>]+content=["']([^"']+)["']/i) ||
+            html.match(/<img[^>]+class="[^"]*rounded[^"]*"[^>]+(?:data-src|src)=["']([^"']+)["']/i);
+        const ogUrlMatch = html.match(/<meta[^>]+property="og:url"[^>]+content=["']([^"']+)["']/i);
+
+        const mangaUrl = (ogUrlMatch ? ogUrlMatch[1].trim() : finalUrl) || `${COMIX_BASE}/comic/${fallbackQuery}`;
+        const slug = mangaUrl.replace(/\/+$/, '').split('/').pop() || `co-${Date.now()}`;
+        const rawCover = coverMatch ? normalizeAssetUrl(coverMatch[1], COMIX_BASE) : '';
+
+        results.push({
+            comixId: slug,
+            comixUrl: mangaUrl.startsWith('http') ? mangaUrl : `${COMIX_BASE}${mangaUrl.startsWith('/') ? '' : '/'}${mangaUrl}`,
+            sourceHost: 'comix.to',
+            title: titleMatch ? stripHtmlTags(titleMatch[1]) : (fallbackQuery || slug),
+            author: 'Comix.to',
+            cover: rawCover || 'https://placehold.co/400x600/1a1d30/3b82f6?text=Comix.to',
+            genres: ['Action', 'Comic'],
+            status: 'Ongoing',
+            rating: '9.6',
+            synopsis: descMatch ? stripHtmlTags(descMatch[1]) : `Imported from Comix.to (${slug}).`
+        });
+        return results;
+    }
+
+    // 2. Parse search result cards (.item, .comic-item, .card, div.grid > div)
+    const seenUrls = new Set();
+    const cardBlocks = html.split(/<div[^>]+class="[^"]*(?:\bitem\b|comic-item|\bcard\b)[^"]*"[^>]*>/i).slice(1);
+    const blocksToScan = cardBlocks.length > 0 ? cardBlocks : html.split(/<a[^>]+href=["'](?=\/?(?:comic|manga|series|title)\/)/i).slice(1);
+
+    for (const block of blocksToScan) {
+        const titleElMatch =
+            block.match(/<h3[^>]*>[\s\S]*?<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i) ||
+            block.match(/<[^>]+class="[^"]*title[^"]*"[^>]*>[\s\S]*?<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i) ||
+            block.match(/<a[^>]+class="[^"]*(?:text-pri|font-semibold)[^"]*"[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i) ||
+            block.match(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+
+        if (!titleElMatch) continue;
+
+        let mangaUrl = titleElMatch[1].trim();
+        if (mangaUrl.startsWith('/')) mangaUrl = `${COMIX_BASE}${mangaUrl}`;
+        if (!mangaUrl.startsWith('http')) continue;
+        if (seenUrls.has(mangaUrl)) continue;
+
+        const cleanTitle = stripHtmlTags(titleElMatch[2]);
+        if (!cleanTitle) continue;
+        seenUrls.add(mangaUrl);
+
+        const slug = mangaUrl.replace(/\/+$/, '').split('/').pop() || `co-${results.length + 1}`;
+        const imgMatch = block.match(/<img[^>]+(?:data-src|src)=["']([^"']+)["']/i);
+        const coverUrl = imgMatch ? normalizeAssetUrl(imgMatch[1], COMIX_BASE) : '';
+
+        results.push({
+            comixId: slug,
+            comixUrl: mangaUrl,
+            sourceHost: 'comix.to',
+            title: cleanTitle,
+            author: 'Comix.to',
+            cover: coverUrl || 'https://placehold.co/400x600/1a1d30/3b82f6?text=Comix.to',
+            genres: ['Action', 'Comic'],
+            status: 'Ongoing',
+            rating: '9.6',
+            synopsis: `Imported from Comix.to (${cleanTitle}).`
+        });
+    }
+
+    return results;
+}
+
+export function parseComixChaptersHtml(html = '') {
+    const rawChapters = [];
+    const seenUrls = new Set();
+    if (!html) return rawChapters;
+
+    // Matches #chapter-list li a, .chapters-list a, ul.list-none li a, .chapter-item
+    const aRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+
+    while ((match = aRegex.exec(html)) !== null) {
+        let chUrl = match[1].trim();
+        const rawTitle = stripHtmlTags(match[2]);
+        if (!chUrl || chUrl === '#' || chUrl.startsWith('javascript:')) continue;
+
+        const looksLikeChapter =
+            /chapter|ch[.-]?\d+|ep[.-]?\d+|\/read\/|\/chapter/i.test(chUrl) ||
+            /chapter|ch\.?\s*\d+|episode/i.test(rawTitle);
+        if (!looksLikeChapter) continue;
+
+        if (chUrl.startsWith('/')) chUrl = `${COMIX_BASE}${chUrl}`;
+        if (!chUrl.startsWith('http') || seenUrls.has(chUrl)) continue;
+        seenUrls.add(chUrl);
+
+        const chSlug = chUrl.replace(/\/+$/, '').split('/').pop() || `ch-${rawChapters.length + 1}`;
+        const numMatch =
+            rawTitle.match(/chapter\s*(\d+(?:\.\d+)?)/i) ||
+            chSlug.match(/(?:chapter|ch)[-_]?(\d+(?:\.\d+)?)/i) ||
+            rawTitle.match(/(\d+(?:\.\d+)?)/);
+        const parsedNum = numMatch ? parseFloat(numMatch[1]) : null;
+
+        rawChapters.push({
+            id: chSlug,
+            url: chUrl,
+            title: rawTitle || `Chapter ${parsedNum || rawChapters.length + 1}`,
+            parsedNum
+        });
+    }
+
+    rawChapters.reverse();
+    const finalChapters = [];
+    const seenNumbers = new Set();
+
+    for (let idx = 0; idx < rawChapters.length; idx++) {
+        const ch = rawChapters[idx];
+        const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
+        if (seenNumbers.has(num)) continue;
+        seenNumbers.add(num);
+
+        finalChapters.push({
+            id: ch.id,
+            url: ch.url,
+            title: ch.title || `Chapter ${num}`,
+            number: num,
+            seqIndex: finalChapters.length + 1
+        });
+    }
+
+    return finalChapters;
+}
+
+export function parseComixPagesHtml(html = '') {
+    const pages = [];
+    const seen = new Set();
+    if (!html) return pages;
+
+    // Matches .reader-area img, .reading-content img, .chapter-images img, div.page-img img
+    const readerSectionMatch = html.match(
+        /<div[^>]+class="[^"]*(?:reader-area|reading-content|chapter-images|page-img)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
+    );
+    const scopeHtml = readerSectionMatch ? readerSectionMatch[1] : html;
+
+    const imgRegex = /<img[^>]+>/gi;
+    let match;
+    while ((match = imgRegex.exec(scopeHtml)) !== null) {
+        const tag = match[0];
+        if (/logo|avatar|banner|icon|favicon/i.test(tag)) continue;
+
+        const srcMatch =
+            tag.match(/data-src=["']([^"']+)["']/i) ||
+            tag.match(/data-url=["']([^"']+)["']/i) ||
+            tag.match(/src=["']([^"']+)["']/i);
+        if (!srcMatch || !srcMatch[1]) continue;
+
+        const cleanUrl = normalizeAssetUrl(srcMatch[1], COMIX_BASE);
+        if (cleanUrl && !seen.has(cleanUrl)) {
+            seen.add(cleanUrl);
+            pages.push(cleanUrl);
+        }
+    }
+
+    return pages;
+}
+
+export async function fetchComixSearch(query = '') {
+    const cleanQ = (query || '').trim();
+    let targetUrl = `${COMIX_BASE}/search?q=${encodeURIComponent(cleanQ)}`;
+    if (cleanQ.startsWith('http') && cleanQ.includes('comix.to')) {
+        targetUrl = cleanQ;
+    } else if (cleanQ && !cleanQ.includes(' ') && cleanQ.includes('/comic/')) {
+        targetUrl = `${COMIX_BASE}${cleanQ.startsWith('/') ? '' : '/'}${cleanQ}`;
+    }
+
+    const { html, finalUrl } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
+    return parseComixHtmlSearch(html, finalUrl || targetUrl, cleanQ);
+}
+
+export async function fetchComixChapters(urlOrSlug = '') {
+    const clean = (urlOrSlug || '').trim();
+    const targetUrl = clean.startsWith('http')
+        ? clean
+        : `${COMIX_BASE}/comic/${clean.replace(/^\/+|\/+$/g, '').replace(/^comic\//i, '')}`;
+    const { html } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
+    return parseComixChaptersHtml(html);
+}
+
+export async function fetchComixPages(chapterUrl = '') {
+    const clean = (chapterUrl || '').trim();
+    const targetUrl = clean.startsWith('http')
+        ? clean
+        : `${COMIX_BASE}${clean.startsWith('/') ? '' : '/'}${clean}`;
+    const { html } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
+    return parseComixPagesHtml(html);
 }
 
 export const MANGAFIRE_API_BASE =
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MANGAFIRE_API_URL) ||
-    process.env.MANGAFIRE_API_URL ||
+    (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.PUBLIC_MANGAFIRE_API_URL || import.meta.env.MANGAFIRE_API_URL)) ||
+    (typeof process !== 'undefined' && process.env && (process.env.PUBLIC_MANGAFIRE_API_URL || process.env.MANGAFIRE_API_URL)) ||
     'http://localhost:3001/api';
 
 export async function fetchMangaFireSearch(query = '', page = 1) {
@@ -451,143 +673,4 @@ export async function fetchMangaFirePages(chapterId) {
     return rawImages
         .map(img => (typeof img === 'string' ? img : img?.url || img?.img || img?.src || ''))
         .filter(Boolean);
-}
-
-
-// ============================================================================
-// COMIX.TO SCRAPER FUNCTIONS
-// ============================================================================
-export const COMIX_BASE = 'https://comix.to';
-export const COMIX_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Referer': 'https://comix.to/'
-};
-
-export async function fetchComixSearch(query = '') {
-    const targetUrl = `${COMIX_BASE}/search?q=${encodeURIComponent(query)}`;
-    const { html, finalUrl } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
-    
-    const results = [];
-    if (!html) return results;
-
-    const blocks = html.split(/<div[^>]+class="[^"]*(?:item|comic-item|card)[^"]*"[^>]*>|<div[^>]+class="[^"]*grid[^"]*"[^>]*>\s*<div/i).slice(1);
-    const seenUrls = new Set();
-
-    for (const block of blocks) {
-        const linkMatch = block.match(/<h3[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i) ||
-                          block.match(/<a[^>]+class="[^"]*(?:text-pri|font-semibold)[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i) ||
-                          block.match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-        if (!linkMatch) continue;
-
-        let mangaUrl = linkMatch[1].trim();
-        if (mangaUrl.startsWith('/')) mangaUrl = COMIX_BASE + mangaUrl;
-        
-        const title = stripHtmlTags(linkMatch[2]);
-        const slug = mangaUrl.split('/').filter(Boolean).pop() || '';
-        
-        if (!slug || seenUrls.has(slug)) continue;
-        seenUrls.add(slug);
-
-        const imgMatch = block.match(/<img[^>]+(?:data-src|src)="([^"]+)"/i);
-        const cover = imgMatch ? imgMatch[1].trim() : 'https://placehold.co/400x600/1a1d30/a855f7?text=Comix';
-
-        results.push({
-            comixId: slug,
-            comixUrl: mangaUrl,
-            sourceHost: 'comix.to',
-            title: title || slug,
-            author: 'Comix Creator',
-            cover,
-            genres: ['Comic', 'Webtoon'],
-            status: 'Ongoing',
-            rating: '9.6',
-            synopsis: `Imported from comix.to (${title || slug}).`
-        });
-    }
-
-    return results;
-}
-
-export async function fetchComixChapters(urlOrSlug) {
-    const targetUrl = urlOrSlug.startsWith('http') ? urlOrSlug : `${COMIX_BASE}/comic/${urlOrSlug}`;
-    const { html } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
-    
-    const chapters = [];
-    const seenUrls = new Set();
-    if (!html) return chapters;
-
-    const liRegex = /<li[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/li>|<a[^>]+class="[^"]*chapter-item[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-    let match;
-
-    while ((match = liRegex.exec(html)) !== null) {
-        let chUrl = (match[1] || match[3] || '').trim();
-        if (!chUrl || seenUrls.has(chUrl)) continue;
-        seenUrls.add(chUrl);
-        if (chUrl.startsWith('/')) chUrl = COMIX_BASE + chUrl;
-
-        const rawTitle = stripHtmlTags(match[2] || match[4]);
-        const parts = chUrl.replace(/\/+$/, '').split('/').filter(Boolean);
-        const chSlug = parts[parts.length - 1] || '';
-
-        const numFromTitle = rawTitle.match(/chapter\s*(\d+(?:\.\d+)?)/i) || rawTitle.match(/^(\d+(?:\.\d+)?)/);
-        const parsedNum = numFromTitle ? parseFloat(numFromTitle[1]) : (chapters.length + 1);
-
-        chapters.push({
-            id: chSlug || `ch-${chapters.length + 1}`,
-            url: chUrl,
-            title: rawTitle || `Chapter ${parsedNum}`,
-            parsedNum
-        });
-    }
-
-    chapters.reverse();
-    const finalChapters = [];
-    const seenNumbers = new Set();
-
-    for (let idx = 0; idx < chapters.length; idx++) {
-        const ch = chapters[idx];
-        const num = (typeof ch.parsedNum === 'number' && !isNaN(ch.parsedNum)) ? ch.parsedNum : (finalChapters.length + 1);
-        if (seenNumbers.has(num)) continue;
-        seenNumbers.add(num);
-
-        finalChapters.push({
-            id: ch.id,
-            url: ch.url,
-            title: ch.title,
-            number: num,
-            seqIndex: finalChapters.length + 1
-        });
-    }
-
-    return finalChapters;
-}
-
-export async function fetchComixPages(chapterUrl) {
-    const targetUrl = chapterUrl.startsWith('http') ? chapterUrl : `${COMIX_BASE}${chapterUrl.startsWith('/') ? '' : '/'}${chapterUrl}`;
-    const { html } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
-    
-    const pages = [];
-    const seen = new Set();
-    if (!html) return pages;
-
-    const readerMatch = html.match(/<div[^>]*class="[^"]*(?:reader-area|reading-content|chapter-images)[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    const scopeHtml = readerMatch ? readerMatch[1] : html;
-
-    const imgRegex = /<img[^>]+>/gi;
-    let match;
-    while ((match = imgRegex.exec(scopeHtml)) !== null) {
-        const tag = match[0];
-        if (/logo|avatar|banner|icon/i.test(tag)) continue;
-        
-        const attrMatch = tag.match(/(?:data-src|src|data-url)=["'](\s*https?:\/\/[^"']+)["']/i);
-        if (attrMatch && attrMatch[1]) {
-            const imgUrl = attrMatch[1].trim();
-            if (!seen.has(imgUrl)) {
-                seen.add(imgUrl);
-                pages.push(imgUrl);
-            }
-        }
-    }
-
-    return pages;
 }

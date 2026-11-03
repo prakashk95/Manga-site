@@ -12,13 +12,15 @@ export async function GET({ request }) {
 
         let referer = 'https://mangakatana.com/';
         if (
+            source === 'comix' ||
+            targetUrl.includes('comix.to') ||
+            chapterUrl.includes('comix.to')
         ) {
+            referer = 'https://comix.to/';
         } else if (targetUrl.includes('mangadex.org')) {
             referer = 'https://mangadex.org/';
         } else if (source === 'mangafire' || targetUrl.includes('mangafire')) {
             referer = 'https://mangafire.to/';
-        } else if (source === 'comix' || targetUrl.includes('comix.to')) {
-            referer = 'https://comix.to/';
         }
 
         if (mode === 'html') {

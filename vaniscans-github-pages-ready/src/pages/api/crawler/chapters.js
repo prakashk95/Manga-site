@@ -1,8 +1,7 @@
 import {
     parseMangaKatanaChaptersHtml,
     fetchHtmlWithFallback,
-    fetchMangaFireChapters
-,
+    fetchMangaFireChapters,
     fetchComixChapters
 } from '@/lib/crawler';
 
@@ -68,9 +67,17 @@ async function fetchMangaDexFeedChapters(mangaId, lang) {
 export async function GET({ request }) {
     const url = new URL(request.url);
     const rawUrlParam = (url.searchParams.get('url') || url.searchParams.get('slug') || '').trim();
-    const source = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
+    const rawSource = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
+    const source = rawUrlParam.includes('comix.to') ? 'comix' : rawSource;
 
-    if (source === 'mangafire') {
+    if (source === 'comix') {
+        try {
+            const chapters = await fetchComixChapters(rawUrlParam);
+            return Response.json({ result: 'ok', data: chapters });
+        } catch (err) {
+            return Response.json({ error: err.message, data: [] }, { status: 500 });
+        }
+    } else if (source === 'mangafire') {
         const mangaId = (url.searchParams.get('mangaId') || '').trim();
         const lang = url.searchParams.get('lang') || 'en';
         if (!mangaId) return Response.json({ error: 'Missing mangaId', data: [] }, { status: 400 });

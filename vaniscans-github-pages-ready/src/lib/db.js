@@ -77,6 +77,16 @@ const SCHEMA_STATEMENTS = [
     )`
 ];
 
+const MIGRATION_STATEMENTS = [
+    `ALTER TABLE mangas ADD COLUMN metaTitle TEXT`,
+    `ALTER TABLE mangas ADD COLUMN metaDescription TEXT`,
+    `ALTER TABLE mangas ADD COLUMN mangafireId TEXT`,
+    `ALTER TABLE mangas ADD COLUMN comixId TEXT`,
+    `ALTER TABLE mangas ADD COLUMN comixUrl TEXT`,
+    `ALTER TABLE chapters ADD COLUMN mangafireChapterId TEXT`,
+    `ALTER TABLE chapters ADD COLUMN comixChapterUrl TEXT`
+];
+
 export async function loadTursoRuntimeConfig() {
     const metaEnv = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
     const envUrl = (
@@ -131,6 +141,9 @@ export async function getDb() {
         for (const sql of SCHEMA_STATEMENTS) {
             await rawClient.execute(sql).catch(() => {});
         }
+        for (const mig of MIGRATION_STATEMENTS) {
+            await rawClient.execute(mig).catch(() => {});
+        }
 
         cachedAdapter = {
             execute: async (queryOrObj) => {
@@ -144,7 +157,6 @@ export async function getDb() {
         return cachedAdapter;
     }
 
-    // Minimal no-op fallback if TURSO_DATABASE_URL isn't set yet in .env so server doesn't crash on boot
     return {
         execute: async () => ({ rows: [] })
     };
@@ -153,6 +165,11 @@ export async function getDb() {
 export function getMangaSlug(m) {
     if (!m) return 'series';
     const base = (m.title || 'series').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const hash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.id || '')
+        .toString()
+        .replace(/^manga-(md|mk|mf|co)-/i, '')
+        .slice(0, 8)
+        .toLowerCase();
     return hash ? `${base}-${hash}` : base;
 }
 
@@ -192,6 +209,8 @@ export async function getServerCatalogWithChapters() {
                 mangakatanaId: r.mangakatanaId || null,
                 mangakatanaUrl: r.mangakatanaUrl || null,
                 mangafireId: r.mangafireId || null,
+                comixId: r.comixId || null,
+                comixUrl: r.comixUrl || null,
                 title: r.title,
                 author: r.author || 'Author Unknown',
                 cover: r.cover || '',
@@ -236,6 +255,7 @@ export async function getServerMangaBySlug(slug = '') {
                 mangadexChapterId: r.mangadexChapterId || null,
                 mangakatanaChapterUrl: r.mangakatanaChapterUrl || null,
                 mangafireChapterId: r.mangafireChapterId || null,
+                comixChapterUrl: r.comixChapterUrl || null,
                 title: r.title || `Chapter ${r.number || 1}`,
                 number: Number(r.number) || 1,
                 pages: Array.isArray(pages) ? pages : [],

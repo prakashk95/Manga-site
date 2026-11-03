@@ -1,15 +1,7 @@
-
-
 import React, { useState, useEffect } from 'react';
 
+import { DEFAULT_MONETIZATION, mergeMonetization } from '@/lib/monetization';
 import {
-    fetchComixSearch,
-    fetchComixChapters,
-    fetchComixPages, DEFAULT_MONETIZATION, mergeMonetization } from '@/lib/monetization';
-import {
-    fetchComixSearch,
-    fetchComixChapters,
-    fetchComixPages,
     verifyAdminCredentials,
     fetchAndSyncMangas,
     fetchAndSyncChapters,
@@ -19,12 +11,12 @@ import {
     deleteLocalChapter
 } from '@/lib/clientStorage';
 import {
-    fetchComixSearch,
-    fetchComixChapters,
-    fetchComixPages,
     parseMangaKatanaHtmlSearch,
     parseMangaKatanaChaptersHtml,
     parseMangaKatanaPagesHtml,
+    parseComixHtmlSearch,
+    parseComixChaptersHtml,
+    parseComixPagesHtml,
     formatMangaDexSearchData,
     fetchMangaFireSearch,
     fetchMangaFireChapters,
@@ -320,7 +312,7 @@ export default function AdminPanelPage() {
         }
     };
 
-    // Client-side proxy fallback helper if serverless IP is blocked by MangaKatana/MangaDex
+    // Client-side proxy fallback helper if server IP is blocked
     const fetchClientHtmlFallback = async (targetUrl) => {
         const tryProxy = async (url, unwrap = false) => {
             const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
@@ -334,12 +326,15 @@ export default function AdminPanelPage() {
             if (t && t.length > 200) return t;
             throw new Error('Empty');
         };
-        return await Promise.any([
-            tryProxy(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, false),
-            tryProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, false),
-            tryProxy(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, true),
-            tryProxy(`https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, false)
-        ]);
+        try {
+            return await Promise.any([
+                tryProxy(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, false),
+                tryProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, false),
+                tryProxy(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, true)
+            ]);
+        } catch (_) {
+            throw new Error(`Upstream host blocked automated requests for ${targetUrl}.`);
+        }
     };
 
     // Tab 3: Crawler Search & Chapter Selector
@@ -348,12 +343,16 @@ export default function AdminPanelPage() {
         if (presetQuery !== null) setSearchQuery(presetQuery);
 
         let activeSrc = forceSource || crawlerSource;
+        if (q.includes('comix.to')) activeSrc = 'comix';
         else if (q.includes('mangakatana.com')) activeSrc = 'mangakatana';
-        else if (q.includes('comix.to')) activeSrc = 'comix';
+
+        if (forceSource || q.includes('comix.to') || q.includes('mangakatana.com')) {
             setCrawlerSource(activeSrc);
         }
 
         const sourceLabel =
+            activeSrc === 'comix'
+                ? 'Comix.to'
                 : activeSrc === 'mangakatana'
                 ? 'MangaKatana.com'
                 : activeSrc === 'mangafire'
@@ -374,7 +373,11 @@ export default function AdminPanelPage() {
 
             // Client-side fallback if serverless container returned 0 results
             if (list.length === 0) {
+                if (activeSrc === 'comix') {
+                    let targetUrl = `https://comix.to/search?q=${encodeURIComponent(q)}`;
+                    if (q.startsWith('http') && q.includes('comix.to')) targetUrl = q;
                     const html = await fetchClientHtmlFallback(targetUrl);
+                    list = parseComixHtmlSearch(html, targetUrl, q);
                 } else if (activeSrc === 'mangafire') {
                     list = await fetchMangaFireSearch(q);
                 } else if (activeSrc === 'mangakatana') {
@@ -420,12 +423,14 @@ export default function AdminPanelPage() {
         setSelectedMangaToCrawl(item);
         setCrawledChaptersList([]);
         setCrawlChapterFilter('');
+        const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
         const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
         const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
-        const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
         setScannerStatus(`Loading full chapter list for "${item.title}"...`);
 
         try {
+            const endpoint = isComix
+                ? `/api/crawler/chapters?source=comix&url=${encodeURIComponent(item.comixUrl || item.comixId)}`
                 : isMangaFire
                 ? `/api/crawler/chapters?source=mangafire&mangaId=${encodeURIComponent(item.mangafireId)}&lang=${encodeURIComponent(crawlerLang)}`
                 : isKatana
@@ -438,7 +443,12 @@ export default function AdminPanelPage() {
 
             // Client-side fallback if serverless fetch returned 0 chapters
             if (list.length === 0) {
+                if (isComix) {
+                    const cleanUrl = (item.comixUrl || '').startsWith('http')
+                        ? item.comixUrl
+                        : `https://comix.to/comic/${(item.comixId || '').replace(/^\/+/, '')}`;
                     const html = await fetchClientHtmlFallback(cleanUrl);
+                    list = parseComixChaptersHtml(html);
                 } else if (isMangaFire) {
                     list = await fetchMangaFireChapters(item.mangafireId, crawlerLang);
                 } else if (isKatana) {
@@ -495,9 +505,11 @@ export default function AdminPanelPage() {
 
         try {
             const item = selectedMangaToCrawl;
+            const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
             const isKatana = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
             const isMangaFire = item.sourceHost === 'mangafire' || !!item.mangafireId;
-        const isComix = item.sourceHost === 'comix.to' || !!item.comixId;
+            const defaultId = isComix
+                ? `manga-co-${(item.comixId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
                 : isMangaFire
                 ? `manga-mf-${(item.mangafireId || Date.now()).toString().replace(/[^a-z0-9]/gi, '').slice(0, 10)}`
                 : isKatana
@@ -510,6 +522,8 @@ export default function AdminPanelPage() {
                 mangakatanaId: item.mangakatanaId || null,
                 mangakatanaUrl: item.mangakatanaUrl || null,
                 mangafireId: item.mangafireId || null,
+                comixId: item.comixId || null,
+                comixUrl: item.comixUrl || null,
                 title: item.title,
                 author: item.author || 'Manga Creator',
                 cover: item.cover,
@@ -541,6 +555,8 @@ export default function AdminPanelPage() {
                 let pagesSaver = [];
 
                 try {
+                    const pageRes = isComix
+                        ? await fetch(`/api/crawler/pages?source=comix&url=${encodeURIComponent(ch.url)}`)
                         : isMangaFire
                         ? await fetch(`/api/crawler/pages?source=mangafire&chapterId=${encodeURIComponent(ch.mangafireChapterId || ch.id)}`)
                         : isKatana
@@ -553,8 +569,10 @@ export default function AdminPanelPage() {
 
                 // Client-side fallback if serverless page fetch returned empty
                 if (pages.length === 0) {
+                    if (isComix && ch.url) {
                         try {
                             const html = await fetchClientHtmlFallback(ch.url);
+                            pages = parseComixPagesHtml(html);
                             pagesSaver = pages;
                         } catch (_) {}
                     } else if (isMangaFire && (ch.mangafireChapterId || ch.id)) {
@@ -572,12 +590,14 @@ export default function AdminPanelPage() {
                 }
 
                 if (pages.length > 0) {
+                    const prefix = isComix ? 'co' : isMangaFire ? 'mf' : isKatana ? 'mk' : 'md';
                     finalChapters.push({
                         id: `${targetMangaId}-${prefix}-${ch.id || i}`,
                         mangaId: targetMangaId,
+                        mangadexChapterId: ch.mangadexChapterId || (!isKatana && !isMangaFire && !isComix ? ch.id : null),
                         mangakatanaChapterUrl: isKatana ? (ch.url || null) : null,
-                        comixChapterUrl: isComix ? (ch.url || null) : null,
                         mangafireChapterId: ch.mangafireChapterId || (isMangaFire ? ch.id : null),
+                        comixChapterUrl: isComix ? (ch.url || null) : null,
                         title: ch.title,
                         number: typeof ch.number === 'number' && !isNaN(ch.number) ? ch.number : (i + 1),
                         pages,
@@ -795,7 +815,7 @@ export default function AdminPanelPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#121422] border border-[#23273e] p-6 rounded-3xl">
                     <div>
                         <h1 className="text-xl font-black text-white">Creator Studio & Admin Dashboard</h1>
-                        <p className="text-xs text-slate-400">Manage series, remove individual chapters, selectively crawl MangaDex, MangaKatana & MangaFire chapters, and configure ads & GA.</p>
+                        <p className="text-xs text-slate-400">Manage series, remove individual chapters, selectively crawl MangaDex, MangaKatana, MangaFire & Comix.to chapters, and configure ads & GA.</p>
                     </div>
                     <div className="flex gap-3">
                         <a href="/" className="px-4 py-2 bg-[#1a1d30] hover:bg-[#232742] text-slate-200 rounded-xl text-xs font-bold transition">Visit Site</a>
@@ -812,6 +832,7 @@ export default function AdminPanelPage() {
                         2. Add Single Chapter
                     </button>
                     <button onClick={() => setActiveTab('crawler')} className={`py-3 px-5 border-b-2 whitespace-nowrap ${activeTab === 'crawler' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+                        3. MangaDex, MangaKatana, MangaFire & Comix.to Crawler
                     </button>
                     <button onClick={() => setActiveTab('analyticsAds')} className={`py-3 px-5 border-b-2 whitespace-nowrap ${activeTab === 'analyticsAds' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
                         4. Analytics & Ad Placements
@@ -970,7 +991,7 @@ export default function AdminPanelPage() {
                                             <span className="font-bold">Read {title || 'Infinite Mage'}</span>
                                             {' / '}
                                             {(metaDescription.trim() || synopsis.trim() || 'is a manga series available to read online in high quality on VaniScans.')
-                                                .replace(new RegExp(`^Read\s+${(title || 'Infinite Mage').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\s*\/?\s*`, 'i'), '')}
+                                                .replace(new RegExp(`^Read\\s+${(title || 'Infinite Mage').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\/?\\s*`, 'i'), '')}
                                         </div>
                                     </div>
                                 </div>
@@ -1096,12 +1117,13 @@ export default function AdminPanelPage() {
                     </div>
                 )}
 
-                {/* TAB 3: MANGADEX & MANGAKATANA CHAPTER SELECTOR CRAWLER + BULK ZIP */}
+                {/* TAB 3: MANGADEX, MANGAKATANA, MANGAFIRE & COMIX.TO CRAWLER + BULK ZIP */}
                 {activeTab === 'crawler' && (
                     <div className="space-y-6">
                         <div className="bg-[#121422] border border-[#23273e] rounded-3xl p-6 sm:p-8 space-y-6">
                             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#1f2337] pb-4">
                                 <div>
+                                    <h3 className="text-base font-black text-white">MangaDex, MangaKatana, MangaFire & Comix.to Live Crawler</h3>
                                     <p className="text-xs text-slate-400">Search any series, load its full chapter list, and select all or particular chapters to import.</p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
@@ -1115,6 +1137,8 @@ export default function AdminPanelPage() {
                                     <button type="button" onClick={() => setCrawlerSource('mangafire')} className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition ${crawlerSource === 'mangafire' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/30' : 'bg-[#1a1d30] text-slate-300 border border-[#2b3052]'}`}>
                                         🔥 MangaFire
                                     </button>
+                                    <button type="button" onClick={() => setCrawlerSource('comix')} className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition ${crawlerSource === 'comix' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-[#1a1d30] text-slate-300 border border-[#2b3052]'}`}>
+                                        📘 Comix.to
                                     </button>
                                 </div>
                             </div>
@@ -1137,16 +1161,17 @@ export default function AdminPanelPage() {
                                 <button type="button" onClick={() => handleScan('One Piece', 'mangafire')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-orange-600/30 text-orange-300 border border-orange-500/30 text-[11px] font-bold transition">
                                     One Piece (MangaFire)
                                 </button>
-                                <button type="button" onClick={() => handleScan('Batman', 'comix')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold transition">
-                                    Batman (Comix)
-                                </button>
+                                <button type="button" onClick={() => handleScan('Solo Leveling', 'comix')} className="px-3 py-1.5 rounded-lg bg-[#1a1d30] hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold transition">
+                                    Solo Leveling (Comix.to)
                                 </button>
                             </div>
 
-                            {/* Search Bar (No Custom Chapter Count Input!) */}
+                            {/* Search Bar */}
                             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                                 <div className="md:col-span-8">
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        {crawlerSource === 'comix'
+                                            ? 'Search Comix.to Title or Direct Series URL'
                                             : crawlerSource === 'mangakatana'
                                             ? 'Search MangaKatana Title or Series URL'
                                             : crawlerSource === 'mangafire'
@@ -1159,6 +1184,8 @@ export default function AdminPanelPage() {
                                         onChange={e => setSearchQuery(e.target.value)}
                                         onKeyDown={e => e.key === 'Enter' && handleScan()}
                                         placeholder={
+                                            crawlerSource === 'comix'
+                                                ? 'e.g. Solo Leveling, One Piece, or https://comix.to/comic/...'
                                                 : crawlerSource === 'mangakatana'
                                                 ? 'e.g. Naruto, Solo Leveling, or mangakatana.com/manga/...'
                                                 : crawlerSource === 'mangafire'
@@ -1173,6 +1200,7 @@ export default function AdminPanelPage() {
                                     <select
                                         value={crawlerLang}
                                         onChange={e => setCrawlerLang(e.target.value)}
+                                        disabled={crawlerSource === 'mangakatana' || crawlerSource === 'comix'}
                                         className="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3 py-2.5 text-xs sm:text-sm text-white disabled:opacity-50"
                                     >
                                         <option value="en">English (EN)</option>
@@ -1189,6 +1217,8 @@ export default function AdminPanelPage() {
                                         {isScanning
                                             ? 'Searching...'
                                             : `Search ${
+                                                  crawlerSource === 'comix'
+                                                      ? 'Comix.to'
                                                       : crawlerSource === 'mangakatana'
                                                       ? 'Katana'
                                                       : crawlerSource === 'mangafire'
@@ -1211,22 +1241,24 @@ export default function AdminPanelPage() {
                                     {!selectedMangaToCrawl ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1">
                                             {scannedResults.map((item, idx) => {
+                                                const isComixItem = item.sourceHost === 'comix.to' || !!item.comixId;
                                                 const isKatanaItem = item.sourceHost === 'mangakatana.com' || !!item.mangakatanaId;
                                                 const isMangaFireItem = item.sourceHost === 'mangafire' || !!item.mangafireId;
-                                                const isComixItem = item.sourceHost === 'comix.to' || !!item.comixId;
                                                 return (
                                                     <div key={idx} className="bg-[#181b2e] border border-[#292d4b] hover:border-purple-500/50 rounded-2xl p-4 flex flex-col justify-between gap-3 transition">
                                                         <div className="flex gap-3.5">
                                                             <img src={item.cover} alt="" referrerPolicy="no-referrer" className="w-20 h-28 object-cover rounded-xl shrink-0 border border-white/10" />
                                                             <div className="min-w-0 flex-1 space-y-1">
                                                                 <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border inline-block ${
-                                                                        ? 'bg-pink-500/20 text-pink-300 border-pink-500/30'
+                                                                    isComixItem
+                                                                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
                                                                         : isMangaFireItem
                                                                         ? 'bg-orange-500/20 text-orange-300 border-orange-500/30'
                                                                         : isKatanaItem
                                                                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                                                                         : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
                                                                 }`}>
+                                                                    {isComixItem ? 'Comix.to' : isMangaFireItem ? 'MangaFire' : isKatanaItem ? 'MangaKatana' : 'MangaDex.org'}
                                                                 </span>
                                                                 <h4 className="text-xs font-black text-white line-clamp-2">{item.title}</h4>
                                                                 <p className="text-[11px] text-purple-300 truncate">{item.author}</p>
@@ -1359,7 +1391,7 @@ export default function AdminPanelPage() {
                     </div>
                 )}
 
-                {/* TAB 4: ANALYTICS & AD PLACEMENTS (RESTORED!) */}
+                {/* TAB 4: ANALYTICS & AD PLACEMENTS */}
                 {activeTab === 'analyticsAds' && (
                     <div className="space-y-8">
                         {/* Google Analytics Card */}

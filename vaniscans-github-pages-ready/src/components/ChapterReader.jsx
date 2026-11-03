@@ -9,7 +9,12 @@ import {
     deleteAndSyncComment,
     saveLocalChaptersBulk
 } from '@/lib/clientStorage';
-import { parseMangaKatanaPagesHtml,  fetchMangaFirePages } from '@/lib/crawler';
+import {
+    parseMangaKatanaPagesHtml,
+    parseComixPagesHtml,
+    fetchMangaFirePages,
+    fetchComixPages
+} from '@/lib/crawler';
 
 function AdSlotBanner({ slot }) {
     if (!slot || !slot.enabled) return null;
@@ -159,8 +164,13 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                 }
                 const found = list.find(m => {
                     const mSlug = (m.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                    const shortHash = (m.mangadexId || m.mangakatanaId || m.mangafireId || m.comixId || m.id || '')
+                        .toString()
+                        .replace(/^manga-(md|mk|mf|co)-/i, '')
+                        .slice(0, 8)
+                        .toLowerCase();
                     const fullSlug = shortHash ? `${mSlug}-${shortHash}` : mSlug;
-                    return fullSlug === slug.toLowerCase() || m.id.toLowerCase() === slug.toLowerCase();
+                    return fullSlug === slug.toLowerCase() || mSlug === slug.toLowerCase() || (m.id || '').toLowerCase() === slug.toLowerCase();
                 });
 
                 if (found) {
@@ -223,15 +233,16 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
                     });
                 }
             } catch (_) {}
+        } else if (needsRefresh && chapterObj.comixChapterUrl) {
+            const rawCoUrl = chapterObj.comixChapterUrl;
+            const coUrl = rawCoUrl.startsWith('http') ? rawCoUrl : `https://comix.to${rawCoUrl.startsWith('/') ? '' : '/'}${rawCoUrl}`;
             try {
                 let freshPages = [];
-                if (proxyRes.ok) {
-                    const html = await proxyRes.text();
-                    freshPages = (html);
-                }
+                const res = await fetch(`/api/crawler/pages?source=comix&url=${encodeURIComponent(coUrl)}`, { cache: 'no-store' });
+                const json = await res.json();
+                freshPages = json.pages || [];
                 if (freshPages.length === 0) {
-                    const json = await res.json();
-                    freshPages = json.pages || [];
+                    freshPages = await fetchComixPages(coUrl);
                 }
                 if (freshPages.length > 0) {
                     chapterObj.pages = freshPages;
@@ -342,8 +353,9 @@ export default function ChapterReader({ slug = '', chapterNumParam = '', initial
 
     const pages = currentChapter.pages || [];
     const ads = monetization?.ads || {};
-    const activeChapterUrl = rawChUrl.startsWith('http') 
-        ? rawChUrl 
+    const rawChUrl = currentChapter.comixChapterUrl || currentChapter.mangakatanaChapterUrl || currentChapter.url || '';
+    const activeChapterUrl = rawChUrl.startsWith('http')
+        ? rawChUrl
         : (rawChUrl ? `https://mangakatana.com${rawChUrl.startsWith('/') ? '' : '/'}${rawChUrl}` : '');
 
     return (

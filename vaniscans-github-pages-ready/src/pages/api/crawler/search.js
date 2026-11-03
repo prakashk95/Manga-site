@@ -2,8 +2,7 @@ import {
     parseMangaKatanaHtmlSearch,
     fetchHtmlWithFallback,
     formatMangaDexSearchData,
-    fetchMangaFireSearch
-,
+    fetchMangaFireSearch,
     fetchComixSearch
 } from '@/lib/crawler';
 
@@ -13,9 +12,17 @@ const USER_AGENT = 'VaniScans/6.0 (+https://vaniscans.online)';
 export async function GET({ request }) {
     const url = new URL(request.url);
     const q = (url.searchParams.get('q') || '').trim();
-    const source = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
+    const rawSource = (url.searchParams.get('source') || 'mangadex').toLowerCase().trim();
+    const source = q.includes('comix.to') ? 'comix' : rawSource;
 
-    if (source === 'mangafire') {
+    if (source === 'comix') {
+        try {
+            const results = await fetchComixSearch(q);
+            return Response.json({ result: 'ok', data: results });
+        } catch (err) {
+            return Response.json({ error: err.message, data: [] }, { status: 500 });
+        }
+    } else if (source === 'mangafire') {
         try {
             const results = await fetchMangaFireSearch(q);
             return Response.json({ result: 'ok', data: results });
