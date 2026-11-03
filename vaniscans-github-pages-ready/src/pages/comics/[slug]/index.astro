@@ -23,7 +23,7 @@ const getChapterSlug = (ch, index = 0) => {
   return match ? match[1] : String(index + 1);
 };
 
-Astro.response.headers.set('Cache-Control', 'public, max-age=30, s-maxage=120, stale-while-revalidate=600');
+Astro.response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
 ---
 <BaseLayout title={seoTitle} description={seoDesc} ogImage={manga?.cover || ''}>
   {!manga ? (
@@ -32,7 +32,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, s-maxage=120, s
       <a href="/" class="px-4 py-2 bg-purple-600 text-white rounded-xl text-xs font-bold">Back to Home</a>
     </div>
   ) : (
-    <div class="min-h-screen flex flex-col bg-[#0b0c13] text-slate-100 pb-20">
+    <div class="min-h-screen flex flex-col bg-[#0b0c13] text-slate-100 pb-20" data-manga-id={manga.id} data-manga-slug={slug} data-server-ch-count={chapters.length}>
       <header class="sticky top-0 z-40 bg-[#0c0d14]/90 backdrop-blur-md border-b border-[#1f2337]">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <a href="/" class="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white">← Back to Catalog</a>
@@ -58,7 +58,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, s-maxage=120, s
                 <div class="flex justify-between"><span>Status:</span> <span class="font-semibold text-emerald-400">{manga.status}</span></div>
                 <div class="flex justify-between"><span>Author:</span> <span class="font-semibold text-slate-200">{manga.author}</span></div>
                 <div class="flex justify-between"><span>Rating:</span> <span class="font-semibold text-amber-400">⭐ {manga.rating}</span></div>
-                <div class="flex justify-between"><span>Chapters:</span> <span class="font-semibold text-purple-400">{chapters.length}</span></div>
+                <div class="flex justify-between"><span>Chapters:</span> <span id="sidebar-ch-count" class="font-semibold text-purple-400">{chapters.length}</span></div>
               </div>
             </div>
           </div>
@@ -75,8 +75,8 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, s-maxage=120, s
             </div>
 
             <div class="bg-[#121422] border border-[#20243b] rounded-2xl p-6 sm:p-8 space-y-4">
-              <h2 class="text-lg font-bold text-white">CHAPTERS ({chapters.length})</h2>
-              <div class="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+              <h2 id="main-ch-heading" class="text-lg font-bold text-white">CHAPTERS ({chapters.length})</h2>
+              <div id="chapters-list-container" class="space-y-2 max-h-[600px] overflow-y-auto pr-1">
                 {chapters.map((ch, idx) => (
                   <a href={`/comics/${slug}/chapter/${getChapterSlug(ch, idx)}`} class="flex items-center justify-between p-3.5 bg-[#16192a] hover:bg-purple-600/25 border border-[#20243b] rounded-xl transition group">
                     <div class="flex items-center gap-3">
@@ -94,6 +94,44 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, s-maxage=120, s
           </div>
         </div>
       </div>
+
+      <script>
+        import { fetchAndSyncChapters } from '@/lib/clientStorage';
+        const root = document.querySelector('[data-manga-id]');
+        if (root) {
+          const mangaId = root.getAttribute('data-manga-id');
+          const slug = root.getAttribute('data-manga-slug');
+          const serverCount = Number(root.getAttribute('data-server-ch-count') || '0');
+          if (mangaId && serverCount === 0) {
+            fetchAndSyncChapters(mangaId).then((chs) => {
+              if (Array.isArray(chs) && chs.length > 0) {
+                const sorted = [...chs].sort((a, b) => (Number(b.number) || 0) - (Number(a.number) || 0));
+                const sideCount = document.getElementById('sidebar-ch-count');
+                const mainHeading = document.getElementById('main-ch-heading');
+                const container = document.getElementById('chapters-list-container');
+                if (sideCount) sideCount.textContent = String(sorted.length);
+                if (mainHeading) mainHeading.textContent = `CHAPTERS (${sorted.length})`;
+                if (container) {
+                  container.innerHTML = sorted.map((ch, idx) => {
+                    const chSlug = (typeof ch.number === 'number' && !isNaN(ch.number)) ? String(ch.number) : String(idx + 1);
+                    const pLen = Array.isArray(ch.pages) ? ch.pages.length : 0;
+                    return `<a href="/comics/${slug}/chapter/${chSlug}" class="flex items-center justify-between p-3.5 bg-[#16192a] hover:bg-purple-600/25 border border-[#20243b] rounded-xl transition group">
+                      <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-lg bg-[#1f233a] group-hover:bg-purple-600 text-purple-400 group-hover:text-white flex items-center justify-center text-xs font-bold transition">📄</div>
+                        <div>
+                          <h4 class="text-sm font-semibold text-white group-hover:text-purple-300 transition">${ch.title || ('Chapter ' + chSlug)}</h4>
+                          <span class="text-[11px] text-slate-500">${pLen} pages</span>
+                        </div>
+                      </div>
+                      <span class="text-xs font-bold px-3 py-1 bg-[#1f233a] group-hover:bg-purple-600 text-slate-300 group-hover:text-white rounded-xl transition">Read</span>
+                    </a>`;
+                  }).join('');
+                }
+              }
+            }).catch(() => {});
+          }
+        }
+      </script>
 
       <footer class="bg-[#0a0b10] border-t border-[#1a1c2b] py-10 mt-16 text-xs text-slate-500">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">

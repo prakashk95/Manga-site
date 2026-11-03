@@ -46,6 +46,12 @@ export default function AdminPanelPage() {
     const [synopsis, setSynopsis] = useState('');
     const [metaTitle, setMetaTitle] = useState('');
     const [metaDescription, setMetaDescription] = useState('');
+    const [customSlug, setCustomSlug] = useState('');
+    const [mgekoUrl, setMgekoUrl] = useState('');
+    const [comixUrl, setComixUrl] = useState('');
+    const [mangakatanaUrl, setMangakatanaUrl] = useState('');
+    const [mangadexId, setMangadexId] = useState('');
+    const [mangafireId, setMangafireId] = useState('');
     const [editChapters, setEditChapters] = useState([]);
     const [chapterFilterQuery, setChapterFilterQuery] = useState('');
 
@@ -172,6 +178,12 @@ export default function AdminPanelPage() {
             synopsis: synopsis || 'No synopsis provided.',
             metaTitle: finalMetaTitle,
             metaDescription: finalMetaDescription,
+            customSlug: customSlug.trim() || null,
+            mgekoUrl: mgekoUrl.trim() || null,
+            comixUrl: comixUrl.trim() || null,
+            mangakatanaUrl: mangakatanaUrl.trim() || null,
+            mangadexId: mangadexId.trim() || null,
+            mangafireId: mangafireId.trim() || null,
             updatedAt: Date.now()
         };
 
@@ -202,6 +214,12 @@ export default function AdminPanelPage() {
         setSynopsis(manga.synopsis || '');
         setMetaTitle(manga.metaTitle || `Read ${manga.title} - VaniScans`);
         setMetaDescription(manga.metaDescription || `Read ${manga.title} / ${manga.synopsis || 'Read manga, manhwa and webtoons online on VaniScans.'}`);
+        setCustomSlug(manga.customSlug || '');
+        setMgekoUrl(manga.mgekoUrl || '');
+        setComixUrl(manga.comixUrl || '');
+        setMangakatanaUrl(manga.mangakatanaUrl || '');
+        setMangadexId(manga.mangadexId || '');
+        setMangafireId(manga.mangafireId || '');
 
         try {
             const chs = await fetchAndSyncChapters(manga.id);
@@ -232,6 +250,12 @@ export default function AdminPanelPage() {
         setSynopsis('');
         setMetaTitle('');
         setMetaDescription('');
+        setCustomSlug('');
+        setMgekoUrl('');
+        setComixUrl('');
+        setMangakatanaUrl('');
+        setMangadexId('');
+        setMangafireId('');
         setEditChapters([]);
         setChapterFilterQuery('');
     };
@@ -940,6 +964,49 @@ export default function AdminPanelPage() {
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">Synopsis</label>
                                     <textarea rows="3" value={synopsis} onChange={e => setSynopsis(e.target.value)} placeholder="Brief story description..." className="w-full bg-[#181b2e] border border-[#292d4b] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"></textarea>
+                                </div>
+
+                                {/* Custom URL / Slug Editor */}
+                                <div className="bg-[#16192b] border border-purple-500/30 rounded-2xl p-5 space-y-3">
+                                    <div>
+                                        <h4 className="text-xs font-black uppercase tracking-wider text-purple-300">
+                                            🔗 Custom Manga URL Path (e.g. "mechanic-slayer-bf07mech")
+                                        </h4>
+                                        <p className="text-[11px] text-slate-400">
+                                            Customize the exact URL slug used for this manga on your site (e.g. vaniscans.online/comics/<strong>your-custom-slug</strong>). Leave blank to auto-generate.
+                                        </p>
+                                    </div>
+                                    <input type="text" value={customSlug} onChange={e => setCustomSlug(e.target.value)} placeholder="e.g. mechanic-slayer-bf07mech" className="w-full bg-[#121422] border border-[#292d4b] rounded-xl px-3.5 py-2 text-xs text-white font-mono" />
+                                </div>
+
+                                {/* Manga Source URLs Editor */}
+                                <div className="bg-[#16192b] border border-blue-500/30 rounded-2xl p-5 space-y-4">
+                                    <div>
+                                        <h4 className="text-xs font-black uppercase tracking-wider text-blue-300">
+                                            🔗 Manga Source URLs & IDs (Edit Where Chapters Pull From)
+                                        </h4>
+                                        <p className="text-[11px] text-slate-400">
+                                            Edit the source reader URLs (Mgeko, Comix, MangaKatana, MangaDex, MangaFire) so chapter reloads pull from your preferred site.
+                                        </p>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">Mgeko.cc URL / Slug</label>
+                                            <input type="text" value={mgekoUrl} onChange={e => setMgekoUrl(e.target.value)} placeholder="https://www.mgeko.cc/manga/..." className="w-full bg-[#121422] border border-[#292d4b] rounded-xl px-3 py-2 text-xs text-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">Comix.to URL / Slug</label>
+                                            <input type="text" value={comixUrl} onChange={e => setComixUrl(e.target.value)} placeholder="https://comix.to/comic/..." className="w-full bg-[#121422] border border-[#292d4b] rounded-xl px-3 py-2 text-xs text-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">MangaKatana URL</label>
+                                            <input type="text" value={mangakatanaUrl} onChange={e => setMangakatanaUrl(e.target.value)} placeholder="https://mangakatana.com/manga/..." className="w-full bg-[#121422] border border-[#292d4b] rounded-xl px-3 py-2 text-xs text-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">MangaDex UUID</label>
+                                            <input type="text" value={mangadexId} onChange={e => setMangadexId(e.target.value)} placeholder="e.g. c72570b8-..." className="w-full bg-[#121422] border border-[#292d4b] rounded-xl px-3 py-2 text-xs text-white" />
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {/* SEO & Search Metadata Editor (Tab Title & Google Search Snippet) */}

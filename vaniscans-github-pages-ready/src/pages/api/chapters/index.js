@@ -12,7 +12,7 @@ export async function POST({ request }) {
 
         await db.execute({
             sql: `INSERT INTO chapters (
-                id, mangaId, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId, comixChapterUrl, mgekoChapterUrl, mgekoChapterUrl,
+                id, mangaId, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId, comixChapterUrl, mgekoChapterUrl,
                 title, number, pages, pagesSaver, atHomeUpdatedAt, createdAt
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET

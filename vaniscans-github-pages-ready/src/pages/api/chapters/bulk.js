@@ -14,7 +14,7 @@ export async function POST({ request }) {
                 const pagesSaverJson = JSON.stringify(Array.isArray(chapter.pagesSaver) ? chapter.pagesSaver : (chapter.pages || []));
                 await db.execute({
                     sql: `INSERT INTO chapters (
-                        id, mangaId, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId, comixChapterUrl, mgekoChapterUrl, mgekoChapterUrl,
+                        id, mangaId, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId, comixChapterUrl, mgekoChapterUrl,
                         title, number, pages, pagesSaver, atHomeUpdatedAt, createdAt
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
@@ -23,7 +23,7 @@ export async function POST({ request }) {
                         mangakatanaChapterUrl = excluded.mangakatanaChapterUrl,
                         mangafireChapterId = excluded.mangafireChapterId,
                         comixChapterUrl = excluded.comixChapterUrl,
-                mgekoChapterUrl = excluded.mgekoChapterUrl,
+                        mgekoChapterUrl = excluded.mgekoChapterUrl,
                         title = excluded.title,
                         number = excluded.number,
                         pages = excluded.pages,
@@ -37,7 +37,7 @@ export async function POST({ request }) {
                         chapter.mangakatanaChapterUrl || null,
                         chapter.mangafireChapterId || null,
                         chapter.comixChapterUrl || null,
-                chapter.mgekoChapterUrl || null,
+                        chapter.mgekoChapterUrl || null,
                         chapter.title || `Chapter ${chapter.number || 1}`,
                         Number(chapter.number) || 1,
                         pagesJson,
