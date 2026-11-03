@@ -461,8 +461,47 @@ export function parseComixChaptersHtml(html = '') {
     const seenUrls = new Set();
     if (!html) return rawChapters;
 
+    // First try to extract from initial-data if it's there
+    const m = html.match(/<script[^>]*id="initial-data"[^>]*>([\s\S]*?)<\/script>/i);
+    if (m) {
+        try {
+            const data = JSON.parse(m[1]);
+            // Extract the first and latest chapter URLs if available in the detail data
+            for (const key in data.queries) {
+                if (key.includes('"manga","detail"')) {
+                    const detail = data.queries[key];
+                    if (detail.firstChapterUrl) {
+                        const url = detail.firstChapterUrl.startsWith('http') ? detail.firstChapterUrl : `${COMIX_BASE}${detail.firstChapterUrl}`;
+                        if (!seenUrls.has(url)) {
+                            seenUrls.add(url);
+                            rawChapters.push({
+                                id: url.split('/').pop(),
+                                url: url,
+                                title: 'First Chapter',
+                                parsedNum: 1
+                            });
+                        }
+                    }
+                    if (detail.latestChapterUrl) {
+                        const url = detail.latestChapterUrl.startsWith('http') ? detail.latestChapterUrl : `${COMIX_BASE}${detail.latestChapterUrl}`;
+                        if (!seenUrls.has(url)) {
+                            seenUrls.add(url);
+                            rawChapters.push({
+                                id: url.split('/').pop(),
+                                url: url,
+                                title: `Chapter ${detail.latestChapter || 'Latest'}`,
+                                parsedNum: detail.latestChapter ? parseFloat(detail.latestChapter) : null
+                            });
+                        }
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+
     // Matches #chapter-list li a, .chapters-list a, ul.list-none li a, .chapter-item
-    const aRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    // Updated to handle /title/slug/{chapter-slug} format
+    const aRegex = /<a[^>]+href=["'](\/title\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
 
     while ((match = aRegex.exec(html)) !== null) {
@@ -470,20 +509,16 @@ export function parseComixChaptersHtml(html = '') {
         const rawTitle = stripHtmlTags(match[2]);
         if (!chUrl || chUrl === '#' || chUrl.startsWith('javascript:')) continue;
 
-        const looksLikeChapter =
-            /chapter|ch[.-]?\d+|ep[.-]?\d+|\/read\/|\/chapter/i.test(chUrl) ||
-            /chapter|ch\.?\s*\d+|episode/i.test(rawTitle);
-        if (!looksLikeChapter) continue;
+        // Ensure it's a chapter link (contains both a slug and a chapter identifier)
+        const parts = chUrl.split('/').filter(Boolean);
+        if (parts.length < 3 || !/chapter/i.test(chUrl)) continue;
 
         if (chUrl.startsWith('/')) chUrl = `${COMIX_BASE}${chUrl}`;
         if (!chUrl.startsWith('http') || seenUrls.has(chUrl)) continue;
         seenUrls.add(chUrl);
 
-        const chSlug = chUrl.replace(/\/+$/, '').split('/').pop() || `ch-${rawChapters.length + 1}`;
-        const numMatch =
-            rawTitle.match(/chapter\s*(\d+(?:\.\d+)?)/i) ||
-            chSlug.match(/(?:chapter|ch)[-_]?(\d+(?:\.\d+)?)/i) ||
-            rawTitle.match(/(\d+(?:\.\d+)?)/);
+        const chSlug = parts.pop();
+        const numMatch = chSlug.match(/(\d+(?:\.\d+)?)/) || rawTitle.match(/(\d+(?:\.\d+)?)/);
         const parsedNum = numMatch ? parseFloat(numMatch[1]) : null;
 
         rawChapters.push({
@@ -494,7 +529,12 @@ export function parseComixChaptersHtml(html = '') {
         });
     }
 
-    rawChapters.reverse();
+    // Sort chapters by number if possible, then reverse to match expected order
+    rawChapters.sort((a, b) => {
+        if (a.parsedNum !== null && b.parsedNum !== null) return a.parsedNum - b.parsedNum;
+        return 0;
+    });
+
     const finalChapters = [];
     const seenNumbers = new Set();
 
@@ -566,7 +606,7 @@ export async function fetchComixSearch(query = '') {
 export async function fetchComixChapters(urlOrSlug = '') {
     const clean = (urlOrSlug || '').trim();
     // New pattern: /title/{hid}
-    const slug = clean.replace(/^\/+|\/+$/g, '').replace(/^comic\//i, '').replace(/^title\//i, '');
+    const slug = clean.replace(/^\/+|\/+$/g, '').replace(/^comic\//i, '').replace(/^title\//i, '').split('?')[0];
     const targetUrl = `${COMIX_BASE}/title/${slug}`;
     const { html } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
     return parseComixChaptersHtml(html);
