@@ -379,8 +379,43 @@ export function parseComixHtmlSearch(html = '', finalUrl = '', fallbackQuery = '
 
     // 2. Parse search result cards (.item, .comic-item, .card, div.grid > div)
     const seenUrls = new Set();
+    // The search page for /?s= might return initial-data, but if it renders HTML, it might be different.
+    // The previous parsing logic might need to be adjusted if the HTML structure changed.
     const cardBlocks = html.split(/<div[^>]+class="[^"]*(?:\bitem\b|comic-item|\bcard\b)[^"]*"[^>]*>/i).slice(1);
     const blocksToScan = cardBlocks.length > 0 ? cardBlocks : html.split(/<a[^>]+href=["'](?=\/?(?:comic|manga|series|title)\/)/i).slice(1);
+
+    // Fallback: search for data in initial-data script tag as well
+    const m = html.match(/<script[^>]*id="initial-data"[^>]*>([\s\S]*?)<\/script>/i);
+    if (m) {
+        try {
+            const data = JSON.parse(m[1]);
+            if (data.queries) {
+                for (const key in data.queries) {
+                    const q = JSON.parse(key);
+                    if (q[0] === 'manga' && q[1] === 'list' && q[2]?.scope === 'hot') {
+                        const items = data.queries[key].items || [];
+                        for (const item of items) {
+                            const mangaUrl = `${COMIX_BASE}/title/${item.hid}`;
+                            if (seenUrls.has(mangaUrl)) continue;
+                            seenUrls.add(mangaUrl);
+                            results.push({
+                                comixId: item.hid,
+                                comixUrl: mangaUrl,
+                                sourceHost: 'comix.to',
+                                title: item.title,
+                                author: 'Comix.to',
+                                cover: item.poster?.medium || 'https://placehold.co/400x600/1a1d30/3b82f6?text=Comix.to',
+                                genres: ['Action', 'Comic'],
+                                status: item.status === 'releasing' ? 'Ongoing' : 'Completed',
+                                rating: '9.6',
+                                synopsis: item.synopsis || `Imported from Comix.to (${item.title}).`
+                            });
+                        }
+                    }
+                }
+            }
+        } catch(e) {}
+    }
 
     for (const block of blocksToScan) {
         const titleElMatch =
@@ -516,7 +551,8 @@ export function parseComixPagesHtml(html = '') {
 
 export async function fetchComixSearch(query = '') {
     const cleanQ = (query || '').trim();
-    let targetUrl = `${COMIX_BASE}/search?q=${encodeURIComponent(cleanQ)}`;
+    // The previous URL was /search?q= which now 404s. Using /?s=
+    let targetUrl = `${COMIX_BASE}/?s=${encodeURIComponent(cleanQ)}`;
     if (cleanQ.startsWith('http') && cleanQ.includes('comix.to')) {
         targetUrl = cleanQ;
     } else if (cleanQ && !cleanQ.includes(' ') && cleanQ.includes('/comic/')) {
@@ -529,15 +565,16 @@ export async function fetchComixSearch(query = '') {
 
 export async function fetchComixChapters(urlOrSlug = '') {
     const clean = (urlOrSlug || '').trim();
-    const targetUrl = clean.startsWith('http')
-        ? clean
-        : `${COMIX_BASE}/comic/${clean.replace(/^\/+|\/+$/g, '').replace(/^comic\//i, '')}`;
+    // New pattern: /title/{hid}
+    const slug = clean.replace(/^\/+|\/+$/g, '').replace(/^comic\//i, '').replace(/^title\//i, '');
+    const targetUrl = `${COMIX_BASE}/title/${slug}`;
     const { html } = await fetchHtmlWithFallback(targetUrl, COMIX_HEADERS);
     return parseComixChaptersHtml(html);
 }
 
 export async function fetchComixPages(chapterUrl = '') {
     const clean = (chapterUrl || '').trim();
+    // For reading, it might be /title/{hid}/{chapter-slug}
     const targetUrl = clean.startsWith('http')
         ? clean
         : `${COMIX_BASE}${clean.startsWith('/') ? '' : '/'}${clean}`;
