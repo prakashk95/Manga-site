@@ -58,22 +58,27 @@ export async function POST({ request }) {
             ? sanitizeSlugStr(manga.customSlug)
             : (existingRow?.customSlug ? sanitizeSlugStr(existingRow.customSlug) : '');
 
+        const lastSyncedAt = Math.max(
+            Number(manga.lastSyncedAt) || 0,
+            Number(existingRow?.lastSyncedAt) || 0
+        );
+
         await db.execute({
             sql: `INSERT INTO mangas (
                 id, mangadexId, mangakatanaId, mangakatanaUrl, mangafireId, comixId, comixUrl, mgekoId, mgekoUrl, fanfoxId, fanfoxUrl,
-                title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription, customSlug
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                title, author, cover, banner, genres, status, rating, synopsis, updatedAt, metaTitle, metaDescription, customSlug, lastSyncedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                mangadexId = excluded.mangadexId,
-                mangakatanaId = excluded.mangakatanaId,
-                mangakatanaUrl = excluded.mangakatanaUrl,
-                mangafireId = excluded.mangafireId,
-                comixId = excluded.comixId,
-                comixUrl = excluded.comixUrl,
-                mgekoId = excluded.mgekoId,
-                mgekoUrl = excluded.mgekoUrl,
-                fanfoxId = excluded.fanfoxId,
-                fanfoxUrl = excluded.fanfoxUrl,
+                mangadexId = COALESCE(excluded.mangadexId, mangas.mangadexId),
+                mangakatanaId = COALESCE(excluded.mangakatanaId, mangas.mangakatanaId),
+                mangakatanaUrl = COALESCE(excluded.mangakatanaUrl, mangas.mangakatanaUrl),
+                mangafireId = COALESCE(excluded.mangafireId, mangas.mangafireId),
+                comixId = COALESCE(excluded.comixId, mangas.comixId),
+                comixUrl = COALESCE(excluded.comixUrl, mangas.comixUrl),
+                mgekoId = COALESCE(excluded.mgekoId, mangas.mgekoId),
+                mgekoUrl = COALESCE(excluded.mgekoUrl, mangas.mgekoUrl),
+                fanfoxId = COALESCE(excluded.fanfoxId, mangas.fanfoxId),
+                fanfoxUrl = COALESCE(excluded.fanfoxUrl, mangas.fanfoxUrl),
                 title = excluded.title,
                 author = excluded.author,
                 cover = excluded.cover,
@@ -85,19 +90,20 @@ export async function POST({ request }) {
                 updatedAt = excluded.updatedAt,
                 metaTitle = excluded.metaTitle,
                 metaDescription = excluded.metaDescription,
-                customSlug = excluded.customSlug`,
+                customSlug = excluded.customSlug,
+                lastSyncedAt = MAX(COALESCE(mangas.lastSyncedAt, 0), COALESCE(excluded.lastSyncedAt, 0))`,
             args: [
                 finalId,
-                manga.mangadexId || null,
-                manga.mangakatanaId || null,
-                manga.mangakatanaUrl || null,
-                manga.mangafireId || null,
-                manga.comixId || null,
-                manga.comixUrl || null,
-                manga.mgekoId || null,
-                manga.mgekoUrl || null,
-                manga.fanfoxId || null,
-                manga.fanfoxUrl || null,
+                manga.mangadexId || existingRow?.mangadexId || null,
+                manga.mangakatanaId || existingRow?.mangakatanaId || null,
+                manga.mangakatanaUrl || existingRow?.mangakatanaUrl || null,
+                manga.mangafireId || existingRow?.mangafireId || null,
+                manga.comixId || existingRow?.comixId || null,
+                manga.comixUrl || existingRow?.comixUrl || null,
+                manga.mgekoId || existingRow?.mgekoId || null,
+                manga.mgekoUrl || existingRow?.mgekoUrl || null,
+                manga.fanfoxId || existingRow?.fanfoxId || null,
+                manga.fanfoxUrl || existingRow?.fanfoxUrl || null,
                 manga.title,
                 manga.author || 'Author Unknown',
                 manga.cover || '',
@@ -109,12 +115,13 @@ export async function POST({ request }) {
                 updatedAt,
                 metaTitle,
                 metaDescription,
-                customSlug
+                customSlug,
+                lastSyncedAt
             ]
         });
 
         invalidateDbCache();
-        return Response.json({ ...manga, id: finalId, metaTitle, metaDescription, customSlug, updatedAt });
+        return Response.json({ ...manga, id: finalId, metaTitle, metaDescription, customSlug, lastSyncedAt, updatedAt });
     } catch (err) {
         return Response.json({ error: err.message }, { status: 500 });
     }

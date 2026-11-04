@@ -1619,7 +1619,14 @@ export default function AdminPanelPage() {
                                     </div>
                                     {syncReport ? (
                                         <div className="space-y-1 text-slate-300">
-                                            <div>Checked: <strong className="text-white">{syncReport.checkedCount || 0} series</strong> in {((syncReport.durationMs || 0) / 1000).toFixed(1)}s</div>
+                                            <div>
+                                                Checked: <strong className="text-white">{syncReport.checkedCount || 0} of {syncReport.totalEligible || syncReport.checkedCount || 0} ongoing series</strong> in {((syncReport.durationMs || 0) / 1000).toFixed(1)}s
+                                            </div>
+                                            {Array.isArray(syncReport.checkedTitles) && syncReport.checkedTitles.length > 0 && (
+                                                <div className="text-[11px] text-slate-400 line-clamp-2" title={syncReport.checkedTitles.join(', ')}>
+                                                    Batch: <span className="text-slate-200">{syncReport.checkedTitles.join(' • ')}</span>
+                                                </div>
+                                            )}
                                             <div>New Chapters Pulled: <strong className="text-emerald-400">{syncReport.newChaptersAdded || 0} chapters</strong></div>
                                             {Array.isArray(syncReport.updatedSeries) && syncReport.updatedSeries.length > 0 && (
                                                 <div className="text-[11px] text-purple-300 truncate">
