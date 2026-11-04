@@ -1,9 +1,12 @@
 import { getDb, invalidateDbCache } from '@/lib/db';
 import {
+    fetchFanfoxSearch,
     fetchFanfoxChapters,
     fetchFanfoxPages,
+    fetchMgekoSearch,
     fetchMgekoChapters,
     fetchMgekoPages,
+    parseMangaKatanaHtmlSearch,
     parseMangaKatanaChaptersHtml,
     parseMangaKatanaPagesHtml,
     fetchHtmlWithFallback,
@@ -17,7 +20,6 @@ const MANGADEX_API = 'https://api.mangadex.org';
 const USER_AGENT = 'VaniScans/6.0 (+https://vaniscans.online)';
 
 let isSyncRunning = false;
-let rollingCursorIndex = 0;
 const recentSyncedTimeById = new Map();
 
 let lastSyncSummary = {
@@ -27,10 +29,29 @@ let lastSyncSummary = {
     newChaptersAdded: 0,
     checkedTitles: [],
     updatedSeries: [],
+    diagnostics: [],
     status: 'Idle'
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function normalizeTitleMatch(t = '') {
+    return (t || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function extractMaxChapterNum(list = []) {
+    let max = -1;
+    for (const ch of list) {
+        const n = Number(ch.number);
+        if (!isNaN(n) && n > max) max = n;
+        const m = String(ch.title || '').match(/(?:ch(?:apter)?\.?\s*)(\d+(?:\.\d+)?)/i);
+        if (m) {
+            const tn = parseFloat(m[1]);
+            if (!isNaN(tn) && tn > max) max = tn;
+        }
+    }
+    return max;
+}
 
 async function fetchMangaDexLatestChapters(mangaId) {
     const params = new URLSearchParams();
@@ -92,19 +113,77 @@ async function fetchMangaDexChapterPages(chapterId) {
     return files.map(f => `https://uploads.mangadex.org/${folder}/${hash}/${f}`);
 }
 
-function normalizeNumKey(n) {
-    const num = Number(n);
-    if (isNaN(num)) return '';
-    return (Math.round(num * 1000) / 1000).toString();
-}
+async function autoRecoverSourceForManga(manga, existingChs, db) {
+    // 1. Check chapter URL columns & first page image URLs
+    for (const ch of existingChs) {
+        if (ch.fanfoxChapterUrl) {
+            const m = ch.fanfoxChapterUrl.match(/https?:\/\/[^/]+\/manga\/([^/]+)/i);
+            if (m) return { sourceType: 'fanfox', sourceTarget: `https://fanfox.net/manga/${m[1]}/` };
+        }
+        if (ch.mgekoChapterUrl) {
+            const m = ch.mgekoChapterUrl.match(/\/reader\/en\/([^/]+?)-chapter-/i);
+            if (m) return { sourceType: 'mgeko', sourceTarget: `https://www.mgeko.cc/manga/${m[1]}/` };
+        }
+        if (ch.mangakatanaChapterUrl) {
+            const m = ch.mangakatanaChapterUrl.match(/https?:\/\/[^/]+\/manga\/([^/]+)/i);
+            if (m) return { sourceType: 'mangakatana', sourceTarget: `https://mangakatana.com/manga/${m[1]}` };
+        }
+        if (ch.comixChapterUrl) {
+            const m = ch.comixChapterUrl.match(/https?:\/\/[^/]+\/comic\/([^/]+)/i);
+            if (m) return { sourceType: 'comix', sourceTarget: `https://comix.to/comic/${m[1]}` };
+        }
+        if (ch.mangadexChapterId && manga.mangadexId) {
+            return { sourceType: 'mangadex', sourceTarget: manga.mangadexId };
+        }
+    }
 
-function normalizeUrlKey(u = '') {
-    return (u || '')
-        .toString()
-        .trim()
-        .toLowerCase()
-        .replace(/^https?:\/\/[^/]+/i, '')
-        .replace(/\/+$/, '');
+    // 2. Auto-search by title across Mgeko, MangaKatana, and FanFox and save the URL back to DB!
+    const cleanTitle = (manga.title || '').trim();
+    if (!cleanTitle) return { sourceType: '', sourceTarget: '' };
+    const normTarget = normalizeTitleMatch(cleanTitle);
+
+    // Try Mgeko first
+    try {
+        const mgResults = await fetchMgekoSearch(cleanTitle);
+        const match = mgResults.find(r => normalizeTitleMatch(r.title) === normTarget) || mgResults[0];
+        if (match && (match.mgekoUrl || match.mgekoId)) {
+            await db.execute({
+                sql: 'UPDATE mangas SET mgekoId = ?, mgekoUrl = ? WHERE id = ?',
+                args: [match.mgekoId || null, match.mgekoUrl || null, manga.id]
+            }).catch(() => {});
+            return { sourceType: 'mgeko', sourceTarget: match.mgekoUrl || match.mgekoId };
+        }
+    } catch (_) {}
+
+    // Try MangaKatana second
+    try {
+        const mkSearchUrl = `https://mangakatana.com/?search=${encodeURIComponent(cleanTitle)}&search_by=book_name`;
+        const { html, finalUrl } = await fetchHtmlWithFallback(mkSearchUrl);
+        const mkResults = parseMangaKatanaHtmlSearch(html, finalUrl || mkSearchUrl, cleanTitle);
+        const match = mkResults.find(r => normalizeTitleMatch(r.title) === normTarget) || mkResults[0];
+        if (match && (match.mangakatanaUrl || match.mangakatanaId)) {
+            await db.execute({
+                sql: 'UPDATE mangas SET mangakatanaId = ?, mangakatanaUrl = ? WHERE id = ?',
+                args: [match.mangakatanaId || null, match.mangakatanaUrl || null, manga.id]
+            }).catch(() => {});
+            return { sourceType: 'mangakatana', sourceTarget: match.mangakatanaUrl || match.mangakatanaId };
+        }
+    } catch (_) {}
+
+    // Try FanFox third
+    try {
+        const ffResults = await fetchFanfoxSearch(cleanTitle);
+        const match = ffResults.find(r => normalizeTitleMatch(r.title) === normTarget) || ffResults[0];
+        if (match && (match.fanfoxUrl || match.fanfoxId)) {
+            await db.execute({
+                sql: 'UPDATE mangas SET fanfoxId = ?, fanfoxUrl = ? WHERE id = ?',
+                args: [match.fanfoxId || null, match.fanfoxUrl || null, manga.id]
+            }).catch(() => {});
+            return { sourceType: 'fanfox', sourceTarget: match.fanfoxUrl || match.fanfoxId };
+        }
+    } catch (_) {}
+
+    return { sourceType: '', sourceTarget: '' };
 }
 
 export async function runBatchSync(batchLimit = 10) {
@@ -119,22 +198,17 @@ export async function runBatchSync(batchLimit = 10) {
     let newChaptersAdded = 0;
     const checkedTitles = [];
     const updatedSeries = [];
+    const diagnostics = [];
 
     try {
         const db = await getDb();
-
-        // Ensure lastSyncedAt column exists on mangas table
         await db.execute('ALTER TABLE mangas ADD COLUMN lastSyncedAt INTEGER DEFAULT 0').catch(() => {});
 
-        // Fetch all ongoing series
         const { rows: allMangas } = await db.execute(
             `SELECT * FROM mangas WHERE status IS NULL OR LOWER(status) != 'completed'`
         );
-
         const allList = Array.isArray(allMangas) ? allMangas : [];
 
-        // Sort by effective lastSyncedAt ascending (combining DB lastSyncedAt and in-memory map)
-        // so the series checked most recently ALWAYS go to the very back of the queue!
         const sortedQueue = [...allList].sort((a, b) => {
             const syncA = Math.max(Number(a.lastSyncedAt) || 0, recentSyncedTimeById.get(a.id) || 0);
             const syncB = Math.max(Number(b.lastSyncedAt) || 0, recentSyncedTimeById.get(b.id) || 0);
@@ -150,63 +224,47 @@ export async function runBatchSync(batchLimit = 10) {
             recentSyncedTimeById.set(manga.id, nowTs);
             checkedTitles.push(manga.title);
 
-            // Persist lastSyncedAt to DB immediately
             await db.execute({
                 sql: 'UPDATE mangas SET lastSyncedAt = ? WHERE id = ?',
                 args: [nowTs, manga.id]
             }).catch(() => {});
 
             try {
-                // Fetch existing chapters for this manga first (also helps infer source if manga columns are blank)
                 const { rows: existingRows } = await db.execute({
                     sql: 'SELECT id, number, title, mangadexChapterId, mangakatanaChapterUrl, mangafireChapterId, comixChapterUrl, mgekoChapterUrl, fanfoxChapterUrl FROM chapters WHERE mangaId = ?',
                     args: [manga.id]
                 });
                 const existingChs = Array.isArray(existingRows) ? existingRows : [];
 
-                // Determine source from manga columns, ID prefix, or existing chapter URLs
                 let sourceType = '';
                 let sourceTarget = '';
 
-                if (manga.fanfoxUrl || manga.fanfoxId || String(manga.id).startsWith('manga-ff-')) {
+                if (manga.fanfoxUrl || manga.fanfoxId) {
                     sourceType = 'fanfox';
                     sourceTarget = manga.fanfoxUrl || manga.fanfoxId;
-                } else if (manga.mgekoUrl || manga.mgekoId || String(manga.id).startsWith('manga-mg-')) {
+                } else if (manga.mgekoUrl || manga.mgekoId) {
                     sourceType = 'mgeko';
                     sourceTarget = manga.mgekoUrl || manga.mgekoId;
-                } else if (manga.mangakatanaUrl || manga.mangakatanaId || String(manga.id).startsWith('manga-mk-')) {
+                } else if (manga.mangakatanaUrl || manga.mangakatanaId) {
                     sourceType = 'mangakatana';
                     sourceTarget = manga.mangakatanaUrl || manga.mangakatanaId;
-                } else if (manga.comixUrl || manga.comixId || String(manga.id).startsWith('manga-co-')) {
+                } else if (manga.comixUrl || manga.comixId) {
                     sourceType = 'comix';
                     sourceTarget = manga.comixUrl || manga.comixId;
-                } else if (manga.mangafireId || String(manga.id).startsWith('manga-mf-')) {
+                } else if (manga.mangafireId) {
                     sourceType = 'mangafire';
                     sourceTarget = manga.mangafireId;
-                } else if (manga.mangadexId || String(manga.id).startsWith('manga-md-')) {
+                } else if (manga.mangadexId) {
                     sourceType = 'mangadex';
                     sourceTarget = manga.mangadexId;
                 } else {
-                    // Infer from existing chapter URLs if manga metadata was saved without source columns
-                    const sampleCh = existingChs.find(
-                        c => c.fanfoxChapterUrl || c.mgekoChapterUrl || c.mangakatanaChapterUrl || c.comixChapterUrl
-                    );
-                    if (sampleCh?.fanfoxChapterUrl) {
-                        sourceType = 'fanfox';
-                        const m = sampleCh.fanfoxChapterUrl.match(/https?:\/\/[^/]+\/manga\/([^/]+)/i);
-                        if (m) sourceTarget = `https://fanfox.net/manga/${m[1]}/`;
-                    } else if (sampleCh?.mgekoChapterUrl) {
-                        sourceType = 'mgeko';
-                        const m = sampleCh.mgekoChapterUrl.match(/\/reader\/en\/([^/]+?)-chapter-/i);
-                        if (m) sourceTarget = `https://www.mgeko.cc/manga/${m[1]}/`;
-                    } else if (sampleCh?.mangakatanaChapterUrl) {
-                        sourceType = 'mangakatana';
-                        const m = sampleCh.mangakatanaChapterUrl.match(/https?:\/\/[^/]+\/manga\/([^/]+)/i);
-                        if (m) sourceTarget = `https://mangakatana.com/manga/${m[1]}`;
-                    }
+                    const recovered = await autoRecoverSourceForManga(manga, existingChs, db);
+                    sourceType = recovered.sourceType;
+                    sourceTarget = recovered.sourceTarget;
                 }
 
                 if (!sourceType || !sourceTarget) {
+                    diagnostics.push({ id: manga.id, title: manga.title, status: 'No source URL found' });
                     continue;
                 }
 
@@ -229,63 +287,58 @@ export async function runBatchSync(batchLimit = 10) {
                     latestChapters = await fetchMangaDexLatestChapters(sourceTarget);
                 }
 
+                const maxExistingNum = extractMaxChapterNum(existingChs);
+
                 if (!Array.isArray(latestChapters) || latestChapters.length === 0) {
-                    await sleep(800);
+                    diagnostics.push({
+                        id: manga.id,
+                        title: manga.title,
+                        source: sourceType,
+                        sourceTarget,
+                        dbMaxCh: maxExistingNum,
+                        remoteCount: 0,
+                        status: '0 chapters returned by upstream'
+                    });
+                    await sleep(600);
                     continue;
                 }
 
-                // Build comprehensive lookup sets so existing chapters (like Overgeared) are NEVER re-imported
-                const existingNumKeys = new Set();
-                const existingIds = new Set();
-                const existingUrls = new Set();
-                const existingTitles = new Set();
-
-                for (const r of existingChs) {
-                    if (r.id) existingIds.add(String(r.id).toLowerCase());
-                    const nk = normalizeNumKey(r.number);
-                    if (nk) existingNumKeys.add(nk);
-                    if (r.title) existingTitles.add(String(r.title).trim().toLowerCase());
-                    for (const uField of [r.fanfoxChapterUrl, r.mgekoChapterUrl, r.mangakatanaChapterUrl, r.comixChapterUrl]) {
-                        if (uField) existingUrls.add(normalizeUrlKey(uField));
-                    }
-                    if (r.mangadexChapterId) existingIds.add(String(r.mangadexChapterId).toLowerCase());
-                    if (r.mangafireChapterId) existingIds.add(String(r.mangafireChapterId).toLowerCase());
-                }
-
-                const prefix =
-                    sourceType === 'fanfox' ? 'ff'
-                    : sourceType === 'mgeko' ? 'mg'
-                    : sourceType === 'mangakatana' ? 'mk'
-                    : sourceType === 'comix' ? 'co'
-                    : sourceType === 'mangafire' ? 'mf'
-                    : 'md';
+                const existingNums = new Set(existingChs.map(c => Math.round(Number(c.number) * 1000) / 1000));
 
                 const newChapters = latestChapters.filter(ch => {
-                    const chNum = Number(ch.number);
-                    const nk = normalizeNumKey(chNum);
-                    if (nk && existingNumKeys.has(nk)) return false;
+                    const chNum = Math.round(Number(ch.number) * 1000) / 1000;
+                    if (isNaN(chNum)) return false;
+                    if (existingNums.has(chNum)) return false;
+                    return chNum > maxExistingNum;
+                });
 
-                    const cleanChKey = (ch.id || `c${chNum}`).toString().replace(/[^a-zA-Z0-9._-]/g, '');
-                    const candidateId = `${manga.id}-${prefix}-${cleanChKey}`.toLowerCase();
-                    const rawId = `${manga.id}-${prefix}-${ch.id}`.toLowerCase();
-                    if (existingIds.has(candidateId) || existingIds.has(rawId)) return false;
-
-                    if (ch.url && existingUrls.has(normalizeUrlKey(ch.url))) return false;
-                    if (ch.title && existingTitles.has(String(ch.title).trim().toLowerCase())) return false;
-
-                    return !isNaN(chNum);
+                diagnostics.push({
+                    id: manga.id,
+                    title: manga.title,
+                    source: sourceType,
+                    sourceTarget,
+                    dbMaxCh: maxExistingNum,
+                    remoteCount: latestChapters.length,
+                    newFound: newChapters.length
                 });
 
                 if (newChapters.length > 0) {
+                    const prefix =
+                        sourceType === 'fanfox' ? 'ff'
+                        : sourceType === 'mgeko' ? 'mg'
+                        : sourceType === 'mangakatana' ? 'mk'
+                        : sourceType === 'comix' ? 'co'
+                        : sourceType === 'mangafire' ? 'mf'
+                        : 'md';
+
                     let seriesChaptersAdded = 0;
 
                     for (let i = 0; i < newChapters.length; i++) {
                         const ch = newChapters[i];
-                        const chNum = Number(ch.number) || (existingChs.length + i + 1);
+                        const chNum = Number(ch.number);
                         const cleanChKey = (ch.id || `c${chNum}`).toString().replace(/[^a-zA-Z0-9._-]/g, '');
                         const chapterId = `${manga.id}-${prefix}-${cleanChKey}`;
 
-                        // Eagerly pre-fetch all page image URLs for the new chapter
                         let pages = [];
                         try {
                             if (sourceType === 'fanfox' && ch.url) {
@@ -302,9 +355,7 @@ export async function runBatchSync(batchLimit = 10) {
                             } else if (sourceType === 'mangadex' && (ch.mangadexChapterId || ch.id)) {
                                 pages = await fetchMangaDexChapterPages(ch.mangadexChapterId || ch.id);
                             }
-                        } catch (pageErr) {
-                            console.error(`[AutoSync] Page scrape warning for ${manga.title} Ch.${chNum}:`, pageErr.message);
-                        }
+                        } catch (_) {}
 
                         await db.execute({
                             sql: `INSERT INTO chapters (
@@ -335,7 +386,7 @@ export async function runBatchSync(batchLimit = 10) {
                         });
                         newChaptersAdded++;
                         seriesChaptersAdded++;
-                        await sleep(500);
+                        await sleep(400);
                     }
 
                     const freshCover = newChapters[0]?.mangaCover || manga.cover || '';
@@ -352,10 +403,10 @@ export async function runBatchSync(batchLimit = 10) {
                     });
                 }
             } catch (err) {
-                console.error(`[AutoSync] Failed checking ${manga.title}:`, err.message);
+                diagnostics.push({ id: manga.id, title: manga.title, error: err.message });
             }
 
-            await sleep(800);
+            await sleep(600);
         }
 
         if (newChaptersAdded > 0) {
@@ -370,6 +421,7 @@ export async function runBatchSync(batchLimit = 10) {
             newChaptersAdded,
             checkedTitles,
             updatedSeries,
+            diagnostics,
             status: 'Completed'
         };
         return { ok: true, ...lastSyncSummary };
@@ -390,18 +442,7 @@ export async function GET({ request }) {
     const statusOnly = url.searchParams.get('status') === '1';
 
     if (statusOnly) {
-        try {
-            const db = await getDb();
-            const totalRes = await db.execute(`SELECT COUNT(*) as total FROM mangas WHERE status IS NULL OR LOWER(status) != 'completed'`);
-            return Response.json({
-                ok: true,
-                isSyncRunning,
-                activeSeriesCount: Number(totalRes.rows?.[0]?.total) || 0,
-                ...lastSyncSummary
-            });
-        } catch (err) {
-            return Response.json({ ok: false, error: err.message, ...lastSyncSummary });
-        }
+        return Response.json({ ok: true, isSyncRunning, ...lastSyncSummary });
     }
 
     const secretEnv = (
@@ -423,7 +464,7 @@ export async function GET({ request }) {
         return Response.json({
             ok: true,
             mode: 'background',
-            message: `Keep-alive ping received! Triggered rolling auto-sync (with full page pre-fetching) for next ${limitParam} manga in background.`,
+            message: `Keep-alive ping received! Triggered rolling auto-sync for next ${limitParam} manga in background.`,
             isSyncRunning: true,
             lastSyncSummary
         });

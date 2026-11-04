@@ -750,10 +750,153 @@ export default function AdminPanelPage() {
         try {
             const res = await fetch(`/api/cron/sync?wait=1&limit=${encodeURIComponent(syncBatchSize)}`, { cache: 'no-store' });
             const data = await res.json();
-            setSyncReport(data);
-            if (data.newChaptersAdded > 0) {
+
+            let totalAdded = Number(data.newChaptersAdded) || 0;
+            const updatedList = Array.isArray(data.updatedSeries) ? [...data.updatedSeries] : [];
+            const diagList = Array.isArray(data.diagnostics) ? data.diagnostics : [];
+
+            // Browser-assisted fallback for any series where Render's datacenter IP was blocked by Cloudflare
+            // (remoteCount === 0 or 'No source URL found')
+            for (const diag of diagList) {
+                if (diag.remoteCount && diag.remoteCount > 0) continue;
+                const mObj = mangas.find(m => m.id === diag.id || m.title === diag.title);
+                if (!mObj) continue;
+
+                let src = diag.source || (mObj.fanfoxUrl || mObj.fanfoxId ? 'fanfox' : mObj.mgekoUrl || mObj.mgekoId ? 'mgeko' : mObj.mangakatanaUrl || mObj.mangakatanaId ? 'mangakatana' : '');
+                let targetUrl = diag.sourceTarget || mObj.fanfoxUrl || mObj.mgekoUrl || mObj.mangakatanaUrl || '';
+
+                // If no source URL was stored on this older manga, search by title via browser proxy
+                if (!src || !targetUrl) {
+                    try {
+                        const mgSearchHtml = await fetchClientHtmlFallback(`https://www.mgeko.cc/search/?search=${encodeURIComponent(mObj.title)}`);
+                        const mgMatches = parseMgekoHtmlSearch(mgSearchHtml, 'https://www.mgeko.cc/search/', mObj.title);
+                        if (mgMatches.length > 0 && mgMatches[0].mgekoUrl) {
+                            src = 'mgeko';
+                            targetUrl = mgMatches[0].mgekoUrl;
+                            await fetch('/api/mangas', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ ...mObj, mgekoId: mgMatches[0].mgekoId, mgekoUrl: mgMatches[0].mgekoUrl })
+                            }).catch(() => {});
+                        }
+                    } catch (_) {}
+                }
+                if (!src || !targetUrl) {
+                    try {
+                        const mkSearchHtml = await fetchClientHtmlFallback(`https://mangakatana.com/?search=${encodeURIComponent(mObj.title)}&search_by=book_name`);
+                        const mkMatches = parseMangaKatanaHtmlSearch(mkSearchHtml, 'https://mangakatana.com/', mObj.title);
+                        if (mkMatches.length > 0 && mkMatches[0].mangakatanaUrl) {
+                            src = 'mangakatana';
+                            targetUrl = mkMatches[0].mangakatanaUrl;
+                            await fetch('/api/mangas', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ ...mObj, mangakatanaId: mkMatches[0].mangakatanaId, mangakatanaUrl: mkMatches[0].mangakatanaUrl })
+                            }).catch(() => {});
+                        }
+                    } catch (_) {}
+                }
+
+                if (!src || !targetUrl) continue;
+
+                try {
+                    let remoteChs = [];
+                    if (src === 'mgeko') {
+                        let baseUrl = targetUrl.startsWith('http') ? targetUrl : `https://www.mgeko.cc/manga/${targetUrl.replace(/^\/+|\/+$/g, '')}/`;
+                        baseUrl = baseUrl.replace(/\/all-chapters\/?$/i, '/');
+                        if (!baseUrl.endsWith('/')) baseUrl += '/';
+                        const html = await fetchClientHtmlFallback(`${baseUrl}all-chapters/`);
+                        remoteChs = parseMgekoChaptersHtml(html);
+                    } else if (src === 'mangakatana') {
+                        const cleanUrl = targetUrl.startsWith('http') ? targetUrl : `https://mangakatana.com/manga/${targetUrl.replace(/^\/+/, '')}`;
+                        const html = await fetchClientHtmlFallback(cleanUrl);
+                        remoteChs = parseMangaKatanaChaptersHtml(html);
+                    } else if (src === 'fanfox') {
+                        const cleanUrl = targetUrl.startsWith('http') ? targetUrl : `https://fanfox.net/manga/${targetUrl.replace(/^\/+|\/+$/g, '')}/`;
+                        const html = await fetchClientHtmlFallback(cleanUrl);
+                        remoteChs = parseFanfoxChaptersHtml(html);
+                    }
+
+                    if (remoteChs.length > 0) {
+                        const existingChs = await fetchAndSyncChapters(mObj.id);
+                        let maxExisting = -1;
+                        const existingNums = new Set();
+                        for (const ec of (existingChs || [])) {
+                            const n = Math.round(Number(ec.number) * 1000) / 1000;
+                            if (!isNaN(n)) {
+                                existingNums.add(n);
+                                if (n > maxExisting) maxExisting = n;
+                            }
+                        }
+
+                        const newChs = remoteChs.filter(ch => {
+                            const n = Math.round(Number(ch.number) * 1000) / 1000;
+                            return !isNaN(n) && !existingNums.has(n) && n > maxExisting;
+                        });
+
+                        if (newChs.length > 0) {
+                            const prefix = src === 'fanfox' ? 'ff' : src === 'mgeko' ? 'mg' : 'mk';
+                            const toSave = [];
+                            for (const ch of newChs) {
+                                let pages = [];
+                                try {
+                                    if (src === 'fanfox' && ch.url) {
+                                        const html = await fetchClientHtmlFallback(toFanfoxRollUrl(ch.url));
+                                        pages = parseFanfoxPagesHtml(html);
+                                    } else if (src === 'mgeko' && ch.url) {
+                                        const html = await fetchClientHtmlFallback(ch.url);
+                                        pages = parseMgekoPagesHtml(html);
+                                    } else if (src === 'mangakatana' && ch.url) {
+                                        const html = await fetchClientHtmlFallback(ch.url);
+                                        pages = parseMangaKatanaPagesHtml(html);
+                                    }
+                                } catch (_) {}
+
+                                const cleanChKey = (ch.id || `c${ch.number}`).toString().replace(/[^a-zA-Z0-9._-]/g, '');
+                                toSave.push({
+                                    id: `${mObj.id}-${prefix}-${cleanChKey}`,
+                                    mangaId: mObj.id,
+                                    mangakatanaChapterUrl: src === 'mangakatana' ? (ch.url || null) : null,
+                                    mgekoChapterUrl: src === 'mgeko' ? (ch.url || null) : null,
+                                    fanfoxChapterUrl: src === 'fanfox' ? (ch.url || null) : null,
+                                    title: ch.title || `Chapter ${ch.number}`,
+                                    number: Number(ch.number),
+                                    pages,
+                                    pagesSaver: pages,
+                                    atHomeUpdatedAt: Date.now(),
+                                    createdAt: Date.now()
+                                });
+                            }
+
+                            await saveLocalChaptersBulk(toSave);
+                            await fetch('/api/chapters/bulk', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ chapters: toSave })
+                            });
+                            await fetch('/api/mangas', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ ...mObj, updatedAt: Date.now(), lastSyncedAt: Date.now() })
+                            });
+
+                            totalAdded += toSave.length;
+                            updatedList.push({ id: mObj.id, title: mObj.title, added: toSave.length, source: src });
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            const finalReport = {
+                ...data,
+                newChaptersAdded: totalAdded,
+                updatedSeries: updatedList
+            };
+            setSyncReport(finalReport);
+
+            if (totalAdded > 0) {
                 await loadMangas();
-                showToast(`Auto-Sync added ${data.newChaptersAdded} new chapter(s) across ${data.updatedSeries?.length || 0} series!`, 'success');
+                showToast(`Auto-Sync added ${totalAdded} new chapter(s) across ${updatedList.length} series!`, 'success');
             } else {
                 showToast(`Checked ${data.checkedCount || 0} series — all up to date!`, 'info');
             }
