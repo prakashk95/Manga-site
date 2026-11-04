@@ -47,7 +47,8 @@ const SCHEMA_STATEMENTS = [
         updatedAt INTEGER,
         metaTitle TEXT,
         metaDescription TEXT,
-        customSlug TEXT
+        customSlug TEXT,
+        lastSyncedAt INTEGER DEFAULT 0
     )`,
     `CREATE TABLE IF NOT EXISTS chapters (
         id TEXT PRIMARY KEY,
@@ -98,7 +99,8 @@ const MIGRATION_STATEMENTS = [
     `ALTER TABLE mangas ADD COLUMN fanfoxId TEXT`,
     `ALTER TABLE mangas ADD COLUMN fanfoxUrl TEXT`,
     `ALTER TABLE chapters ADD COLUMN fanfoxChapterUrl TEXT`,
-    `ALTER TABLE mangas ADD COLUMN customSlug TEXT`
+    `ALTER TABLE mangas ADD COLUMN customSlug TEXT`,
+    `ALTER TABLE mangas ADD COLUMN lastSyncedAt INTEGER DEFAULT 0`
 ];
 
 export async function loadTursoRuntimeConfig() {
@@ -262,6 +264,7 @@ export async function getServerCatalogWithChapters() {
                 metaTitle: r.metaTitle || '',
                 metaDescription: r.metaDescription || '',
                 customSlug: r.customSlug || '',
+                lastSyncedAt: Number(r.lastSyncedAt) || 0,
                 latestChapters: chaptersByMangaId[r.id] || [],
                 updatedAt: Number(r.updatedAt) || Date.now()
             };

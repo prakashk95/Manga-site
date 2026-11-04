@@ -76,6 +76,11 @@ export default function AdminPanelPage() {
     const [crawlLoading, setCrawlLoading] = useState(false);
     const [crawlProgress, setCrawlProgress] = useState('');
 
+    // Auto-Sync Cron state
+    const [syncRunning, setSyncRunning] = useState(false);
+    const [syncBatchSize, setSyncBatchSize] = useState(10);
+    const [syncReport, setSyncReport] = useState(null);
+
     // Bulk ZIP state
     const [zipSeriesId, setZipSeriesId] = useState('');
     const [pendingZipFile, setPendingZipFile] = useState(null);
@@ -737,6 +742,25 @@ export default function AdminPanelPage() {
         } finally {
             setCrawlLoading(false);
             setCrawlProgress('');
+        }
+    };
+
+    const handleTriggerAutoSync = async () => {
+        setSyncRunning(true);
+        try {
+            const res = await fetch(`/api/cron/sync?wait=1&limit=${encodeURIComponent(syncBatchSize)}`, { cache: 'no-store' });
+            const data = await res.json();
+            setSyncReport(data);
+            if (data.newChaptersAdded > 0) {
+                await loadMangas();
+                showToast(`Auto-Sync added ${data.newChaptersAdded} new chapter(s) across ${data.updatedSeries?.length || 0} series!`, 'success');
+            } else {
+                showToast(`Checked ${data.checkedCount || 0} series — all up to date!`, 'info');
+            }
+        } catch (err) {
+            showToast(`Auto-Sync error: ${err.message}`, 'error');
+        } finally {
+            setSyncRunning(false);
         }
     };
 
@@ -1536,6 +1560,80 @@ export default function AdminPanelPage() {
                                     )}
                                 </div>
                             )}
+                        </div>
+
+                        {/* Automated Cron-Job.org Rolling Library Sync */}
+                        <div className="bg-[#121422] border border-emerald-500/30 rounded-3xl p-6 sm:p-8 space-y-5">
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#1f2337] pb-4">
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                            24/7 Render Free Plan Automation
+                                        </span>
+                                    </div>
+                                    <h3 className="text-base font-black text-white mt-1">
+                                        🔄 Automated Rolling Library Sync (FanFox, Mgeko & MangaKatana)
+                                    </h3>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                        Point your <strong className="text-slate-200">cron-job.org</strong> keep-alive URL to the endpoint below. Every ping keeps your Render server awake AND checks the next batch of ongoing manga for new chapters automatically!
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <select
+                                        value={syncBatchSize}
+                                        onChange={e => setSyncBatchSize(Number(e.target.value))}
+                                        className="bg-[#181b2e] border border-[#292d4b] rounded-xl px-3 py-2.5 text-xs text-white font-semibold"
+                                    >
+                                        <option value={5}>Check 5 Series / Run</option>
+                                        <option value={10}>Check 10 Series / Run</option>
+                                        <option value={15}>Check 15 Series / Run</option>
+                                        <option value={25}>Check 25 Series / Run</option>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        disabled={syncRunning}
+                                        onClick={handleTriggerAutoSync}
+                                        className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-emerald-600/25 transition"
+                                    >
+                                        {syncRunning ? '⏳ Syncing Batch...' : '⚡ Run Batch Sync Now'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                <div className="bg-[#181b2e] border border-[#292d4b] rounded-2xl p-4 space-y-1.5">
+                                    <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                                        Your Cron-Job.org Keep-Alive + Auto-Sync URL
+                                    </div>
+                                    <div className="font-mono text-xs text-white bg-[#121422] px-3 py-2 rounded-xl border border-[#23273e] break-all select-all">
+                                        {typeof window !== 'undefined' ? `${window.location.origin}/api/cron/sync?limit=12` : 'https://vaniscans.online/api/cron/sync?limit=12'}
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">
+                                        Set cron-job.org to ping this URL every <strong className="text-slate-200">10 or 14 minutes</strong>. At 12 manga per 10-minute ping, it checks <strong className="text-emerald-300">1,728 manga per day</strong> with zero IP blocks!
+                                    </p>
+                                </div>
+
+                                <div className="bg-[#181b2e] border border-[#292d4b] rounded-2xl p-4 space-y-1.5">
+                                    <div className="text-[11px] font-bold uppercase tracking-wider text-purple-300">
+                                        Last Sync Batch Report
+                                    </div>
+                                    {syncReport ? (
+                                        <div className="space-y-1 text-slate-300">
+                                            <div>Checked: <strong className="text-white">{syncReport.checkedCount || 0} series</strong> in {((syncReport.durationMs || 0) / 1000).toFixed(1)}s</div>
+                                            <div>New Chapters Pulled: <strong className="text-emerald-400">{syncReport.newChaptersAdded || 0} chapters</strong></div>
+                                            {Array.isArray(syncReport.updatedSeries) && syncReport.updatedSeries.length > 0 && (
+                                                <div className="text-[11px] text-purple-300 truncate">
+                                                    Updated: {syncReport.updatedSeries.map(u => `${u.title} (+${u.added})`).join(', ')}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="text-slate-400 text-[11px] py-2">
+                                            Click &quot;⚡ Run Batch Sync Now&quot; to test a batch immediately, or let cron-job.org trigger it automatically in the background.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         </div>
 
                         {/* Bulk ZIP Unpacker */}
