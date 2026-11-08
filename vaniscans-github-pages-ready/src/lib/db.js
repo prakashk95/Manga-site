@@ -1,7 +1,6 @@
 import { createClient } from '@libsql/client/web';
-import fs from 'fs';
 
-const CONFIG_JSON_PATH = '/tmp/vaniscans_turso_config.json';
+let RUNTIME_CONFIG_MEMORY = { url: '', authToken: '' };
 const QUERY_CACHE = new Map();
 
 export async function getCachedQuery(key, ttlMs, fetcher) {
@@ -103,38 +102,40 @@ const MIGRATION_STATEMENTS = [
     `ALTER TABLE mangas ADD COLUMN lastSyncedAt INTEGER DEFAULT 0`
 ];
 
-export async function loadTursoRuntimeConfig() {
+export async function loadTursoRuntimeConfig(runtimeEnv = null) {
     const metaEnv = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
+    const procEnv = typeof process !== 'undefined' && process.env ? process.env : {};
+    const cfEnv = runtimeEnv || {};
+
     const envUrl = (
+        cfEnv.TURSO_DATABASE_URL ||
+        cfEnv.LIBSQL_URL ||
         metaEnv.TURSO_DATABASE_URL ||
-        process.env.TURSO_DATABASE_URL ||
-        process.env.LIBSQL_URL ||
+        procEnv.TURSO_DATABASE_URL ||
+        procEnv.LIBSQL_URL ||
         ''
     ).trim();
     const envToken = (
+        cfEnv.TURSO_AUTH_TOKEN ||
+        cfEnv.LIBSQL_AUTH_TOKEN ||
         metaEnv.TURSO_AUTH_TOKEN ||
-        process.env.TURSO_AUTH_TOKEN ||
-        process.env.LIBSQL_AUTH_TOKEN ||
+        procEnv.TURSO_AUTH_TOKEN ||
+        procEnv.LIBSQL_AUTH_TOKEN ||
         ''
     ).trim();
 
     if (envUrl) return { url: envUrl, authToken: envToken, source: 'env' };
 
-    try {
-        if (fs.existsSync(CONFIG_JSON_PATH)) {
-            const cfg = JSON.parse(fs.readFileSync(CONFIG_JSON_PATH, 'utf-8'));
-            if (cfg && cfg.url) return { ...cfg, source: 'runtime' };
-        }
-    } catch (_) {}
+    if (RUNTIME_CONFIG_MEMORY && RUNTIME_CONFIG_MEMORY.url) {
+        return { ...RUNTIME_CONFIG_MEMORY, source: 'runtime' };
+    }
 
     return { url: '', authToken: '', source: 'unconfigured' };
 }
 
 export async function saveTursoRuntimeConfig(url, authToken) {
     const clean = { url: (url || '').trim(), authToken: (authToken || '').trim() };
-    try {
-        fs.writeFileSync(CONFIG_JSON_PATH, JSON.stringify(clean), 'utf-8');
-    } catch (_) {}
+    RUNTIME_CONFIG_MEMORY = clean;
     cachedAdapter = null;
     invalidateDbCache();
     return clean;

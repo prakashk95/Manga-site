@@ -437,7 +437,7 @@ export async function runBatchSync(batchLimit = 10) {
     }
 }
 
-export async function GET({ request }) {
+export async function GET({ request, locals }) {
     const url = new URL(request.url);
     const statusOnly = url.searchParams.get('status') === '1';
 
@@ -445,9 +445,11 @@ export async function GET({ request }) {
         return Response.json({ ok: true, isSyncRunning, ...lastSyncSummary });
     }
 
+    const cfEnv = locals?.runtime?.env || {};
     const secretEnv = (
+        cfEnv.CRON_SECRET ||
         (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.CRON_SECRET) ||
-        process.env.CRON_SECRET ||
+        (typeof process !== 'undefined' && process.env && process.env.CRON_SECRET) ||
         ''
     ).trim();
 
@@ -460,7 +462,10 @@ export async function GET({ request }) {
     const waitMode = url.searchParams.get('wait') === '1';
 
     if (!waitMode) {
-        runBatchSync(limitParam).catch(() => {});
+        const bgPromise = runBatchSync(limitParam).catch(() => {});
+        if (locals?.runtime?.ctx?.waitUntil) {
+            locals.runtime.ctx.waitUntil(bgPromise);
+        }
         return Response.json({
             ok: true,
             mode: 'background',
