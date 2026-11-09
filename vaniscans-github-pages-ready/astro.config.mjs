@@ -1,15 +1,12 @@
 import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
 import tailwind from '@astrojs/tailwind';
-import cloudflare from '@astrojs/cloudflare';
+import node from '@astrojs/node';
 
 export default defineConfig({
   output: 'server',
-  adapter: cloudflare({
-    imageService: 'passthrough',
-    platformProxy: {
-      enabled: true,
-    },
+  adapter: node({
+    mode: 'standalone',
   }),
   integrations: [
     react(),
@@ -17,9 +14,4 @@ export default defineConfig({
       applyBaseStyles: false,
     }),
   ],
-  vite: {
-    ssr: {
-      external: ['node:crypto', 'crypto'],
-    },
-  },
 });
